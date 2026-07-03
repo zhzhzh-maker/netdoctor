@@ -11,6 +11,7 @@ const defaultEventLimit = 2048
 type eventStore struct {
 	mu     sync.RWMutex
 	limit  int
+	next   uint64
 	events []model.NetworkEvent
 }
 
@@ -24,6 +25,9 @@ func newEventStore(limit int) *eventStore {
 func (s *eventStore) add(event model.NetworkEvent) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	s.next++
+	event.Sequence = s.next
 
 	if len(s.events) >= s.limit {
 		copy(s.events, s.events[1:])

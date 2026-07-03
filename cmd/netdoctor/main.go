@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -11,8 +12,10 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/netdoctor/netdoctor/internal/doctor"
+	"github.com/netdoctor/netdoctor/internal/model"
 	"github.com/netdoctor/netdoctor/internal/output"
 	"github.com/netdoctor/netdoctor/internal/web"
 )
@@ -68,6 +71,10 @@ func runCollector(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	objectPath := fs.String("object", "", "compiled eBPF object path")
 	eventLimit := fs.Int("event-limit", 2048, "number of recent eBPF events kept in memory")
+	interval := fs.Duration("interval", time.Second, "event polling interval")
+	jsonLines := fs.Bool("json", false, "print events as JSON lines")
+	webEnabled := fs.Bool("web", true, "start the Web UI/API while tailing events")
+	addr := fs.String("addr", ":56789", "HTTP listen address when -web is enabled")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -84,13 +91,50 @@ func runCollector(args []string) error {
 	}
 	defer service.Close()
 
-	<-ctx.Done()
-	return nil
+	printRunStatus(service.Snapshot().EBPF)
+	var server *http.Server
+	var errCh <-chan error
+	if *webEnabled {
+		server, errCh = startWeb(service, *addr)
+		fmt.Fprintf(os.Stderr, "web listening on %s\n", displayURL(*addr))
+	}
+
+	ticker := time.NewTicker(*interval)
+	defer ticker.Stop()
+
+	var lastSeq uint64
+	for {
+		select {
+		case <-ctx.Done():
+			if server != nil {
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				return server.Shutdown(shutdownCtx)
+			}
+			return nil
+		case err := <-errCh:
+			if errors.Is(err, http.ErrServerClosed) {
+				return nil
+			}
+			return err
+		case <-ticker.C:
+			snapshot := service.Snapshot()
+			for _, event := range snapshot.Events {
+				if event.Sequence <= lastSeq {
+					continue
+				}
+				if err := printEvent(os.Stdout, event, *jsonLines); err != nil {
+					return err
+				}
+				lastSeq = event.Sequence
+			}
+		}
+	}
 }
 
 func serve(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	addr := fs.String("addr", "127.0.0.1:8080", "HTTP listen address")
+	addr := fs.String("addr", ":56789", "HTTP listen address")
 	objectPath := fs.String("object", "", "optional compiled eBPF object path")
 	eventLimit := fs.Int("event-limit", 4096, "number of recent eBPF events kept in memory")
 	if err := fs.Parse(args); err != nil {
@@ -106,20 +150,12 @@ func serve(args []string) error {
 	}
 	defer service.Close()
 
-	server := &http.Server{
-		Addr:    *addr,
-		Handler: web.New(service).Handler(),
-	}
-
-	errCh := make(chan error, 1)
-	go func() {
-		log.Printf("netdoctor web listening on http://%s", *addr)
-		errCh <- server.ListenAndServe()
-	}()
+	server, errCh := startWeb(service, *addr)
+	log.Printf("netdoctor web listening on %s", displayURL(*addr))
 
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5_000_000_000)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return server.Shutdown(shutdownCtx)
 	case err := <-errCh:
@@ -135,11 +171,57 @@ func usage() {
 
 Usage:
   netdoctor probe [-object netdoctor_bpfel.o]
-  netdoctor run -object netdoctor_bpfel.o
-  netdoctor serve [-addr 127.0.0.1:8080] [-object netdoctor_bpfel.o]
+  netdoctor run -object netdoctor_bpfel.o [-json] [-addr :56789]
+  netdoctor serve [-addr :56789] [-object netdoctor_bpfel.o]
 
 Commands:
   probe   check cilium/ebpf availability and optionally attach an object once
   run     attach an eBPF object and keep collectors running
   serve   start the optional web UI and JSON API`)
+}
+
+func printRunStatus(status model.EBPFStatus) {
+	fmt.Fprintf(os.Stderr, "netdoctor attached %d eBPF programs\n", len(status.Attached))
+	for _, section := range status.Attached {
+		fmt.Fprintf(os.Stderr, "  attached %s\n", section)
+	}
+	for _, section := range status.Skipped {
+		fmt.Fprintf(os.Stderr, "  skipped  %s\n", section)
+	}
+	fmt.Fprintln(os.Stderr, "waiting for events...")
+}
+
+func startWeb(service *doctor.Service, addr string) (*http.Server, <-chan error) {
+	server := &http.Server{
+		Addr:    addr,
+		Handler: web.New(service).Handler(),
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ListenAndServe()
+	}()
+	return server, errCh
+}
+
+func displayURL(addr string) string {
+	if strings.HasPrefix(addr, ":") {
+		return "http://127.0.0.1" + addr
+	}
+	return "http://" + addr
+}
+
+func printEvent(file *os.File, event model.NetworkEvent, asJSON bool) error {
+	if asJSON {
+		enc := json.NewEncoder(file)
+		return enc.Encode(event)
+	}
+
+	fmt.Fprintf(file, "%s seq=%d kind=%s source=%s raw=%s\n",
+		event.Time.Format(time.RFC3339),
+		event.Sequence,
+		event.Kind,
+		event.Source,
+		event.Raw,
+	)
+	return nil
 }

@@ -144,6 +144,7 @@ type EBPFStatus struct {
 }
 
 type NetworkEvent struct {
+	Sequence  uint64    `json:"sequence,omitempty"`
 	Time      time.Time `json:"time"`
 	Source    string    `json:"source"`
 	Kind      string    `json:"kind"`
