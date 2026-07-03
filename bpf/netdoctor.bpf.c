@@ -128,7 +128,7 @@ struct connect_start {
 	char comm[TASK_COMM_LEN];
 };
 
-typedef struct event {
+typedef struct {
 	__u64 ts_ns;
 	__u64 skaddr;
 	__u64 duration_us;
