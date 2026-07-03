@@ -7,7 +7,6 @@ GOMODCACHE := $(CURDIR)/$(CACHE_DIR)/gomod
 GOENV := GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE)
 
 ADDR ?= 127.0.0.1:8080
-OBJECT ?=
 EVENT_LIMIT ?= 4096
 
 BPF_SRC := bpf/netdoctor.bpf.c
@@ -17,6 +16,9 @@ BPF_ARCH ?= $(shell uname -m | sed -e 's/x86_64/x86/' -e 's/aarch64/arm64/' -e '
 BPF_OUTPUT_DIR := internal/collector/ebpf
 BPF_IDENT := netdoctor
 BPF_GO_PACKAGE := ebpfcollector
+BPF_OBJECT := $(BPF_OUTPUT_DIR)/$(BPF_IDENT)_$(BPF_TARGET).o
+RUNTIME_BPF_OBJECT := $(BIN_DIR)/$(BPF_IDENT)_$(BPF_TARGET).o
+OBJECT ?= $(RUNTIME_BPF_OBJECT)
 
 .PHONY: help deps build install test test-linux fmt vet tidy run probe serve bpf bpf-vmlinux clean
 
@@ -30,7 +32,7 @@ help:
 	@printf '  %-14s %s\n' 'vet' 'run go vet'
 	@printf '  %-14s %s\n' 'tidy' 'tidy go.mod/go.sum'
 	@printf '  %-14s %s\n' 'probe' 'run the eBPF probe; pass OBJECT=path optionally'
-	@printf '  %-14s %s\n' 'run' 'attach an eBPF object; requires OBJECT=path'
+	@printf '  %-14s %s\n' 'run' 'attach an eBPF object; defaults to bin/netdoctor_bpfel.o'
 	@printf '  %-14s %s\n' 'serve' 'start Web UI/API; pass ADDR=host:port and OBJECT=path'
 	@printf '  %-14s %s\n' 'bpf-vmlinux' 'generate bpf/vmlinux.h on Linux'
 	@printf '  %-14s %s\n' 'bpf' 'generate cilium/ebpf Go bindings with bpf2go; pass BPF_ARCH=x86 or arm64'
@@ -67,16 +69,16 @@ tidy:
 
 probe:
 	@mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/gomod
-	$(GOENV) go run $(CMD) probe $(if $(OBJECT),-object $(OBJECT),) -event-limit $(EVENT_LIMIT)
+	$(GOENV) go run $(CMD) probe $(if $(wildcard $(OBJECT)),-object $(OBJECT),) -event-limit $(EVENT_LIMIT)
 
 run:
-	@test -n "$(OBJECT)" || (echo 'OBJECT is required, example: make run OBJECT=./netdoctor_bpfel.o' >&2; exit 2)
+	@test -r "$(OBJECT)" || (echo 'BPF object not found: $(OBJECT). Run make bpf BPF_ARCH=x86 first, or pass OBJECT=/path/to/file.o' >&2; exit 2)
 	@mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/gomod
 	$(GOENV) go run $(CMD) run -object $(OBJECT) -event-limit $(EVENT_LIMIT)
 
 serve:
 	@mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/gomod
-	$(GOENV) go run $(CMD) serve -addr $(ADDR) $(if $(OBJECT),-object $(OBJECT),) -event-limit $(EVENT_LIMIT)
+	$(GOENV) go run $(CMD) serve -addr $(ADDR) $(if $(wildcard $(OBJECT)),-object $(OBJECT),) -event-limit $(EVENT_LIMIT)
 
 bpf-vmlinux:
 	@test "$$(uname -s)" = "Linux" || (echo 'bpf-vmlinux must run on Linux' >&2; exit 2)
@@ -84,7 +86,7 @@ bpf-vmlinux:
 	bpftool btf dump file /sys/kernel/btf/vmlinux format c > $(VMLINUX)
 
 bpf: $(VMLINUX)
-	@mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/gomod
+	@mkdir -p $(BIN_DIR) $(CACHE_DIR)/go-build $(CACHE_DIR)/gomod
 	$(GOENV) go run github.com/cilium/ebpf/cmd/bpf2go \
 		-target $(BPF_TARGET) \
 		-type event \
@@ -93,6 +95,8 @@ bpf: $(VMLINUX)
 		-go-package $(BPF_GO_PACKAGE) \
 		-output-dir $(BPF_OUTPUT_DIR) \
 		$(BPF_IDENT) $(BPF_SRC)
+	cp $(BPF_OBJECT) $(RUNTIME_BPF_OBJECT)
+	@printf 'BPF object ready: %s\n' '$(RUNTIME_BPF_OBJECT)'
 
 clean:
 	rm -rf $(BIN_DIR) $(CACHE_DIR)

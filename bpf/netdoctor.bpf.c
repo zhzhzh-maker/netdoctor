@@ -818,7 +818,6 @@ static __always_inline int submit_packet_event(struct __sk_buff *skb, __u8 direc
 	event->daddr_v4 = daddr_v4;
 	__builtin_memcpy(event->saddr_v6, saddr_v6, sizeof(event->saddr_v6));
 	__builtin_memcpy(event->daddr_v6, daddr_v6, sizeof(event->daddr_v6));
-	fill_process(event);
 	bpf_ringbuf_submit(event, 0);
 	return TC_ACT_OK;
 }

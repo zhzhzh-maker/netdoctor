@@ -76,6 +76,7 @@ Typical generation flow on Linux:
 ```bash
 make bpf-vmlinux
 make bpf
+sudo ./bin/netdoctor run -object ./bin/netdoctor_bpfel.o
 ```
 
 `make bpf` passes `-D__TARGET_ARCH_<arch>` for libbpf tracing macros. The default is detected from `uname -m`; override it when cross-building:
@@ -86,6 +87,8 @@ make bpf BPF_ARCH=arm64
 ```
 
 The current loader can also consume a compiled object path directly, so modules can be developed independently before generated Go wrappers are committed.
+
+`bpf2go` writes its original object to `internal/collector/ebpf/netdoctor_bpfel.o`. The Makefile also copies it to `bin/netdoctor_bpfel.o`, which is the default object path for `make run`.
 
 ## Roadmap
 
