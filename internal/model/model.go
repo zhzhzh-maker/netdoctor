@@ -139,6 +139,7 @@ type EBPFStatus struct {
 	Capabilities  []string `json:"capabilities,omitempty"`
 	ObjectPath    string   `json:"object_path,omitempty"`
 	Attached      []string `json:"attached,omitempty"`
+	Skipped       []string `json:"skipped,omitempty"`
 	Error         string   `json:"error,omitempty"`
 }
 

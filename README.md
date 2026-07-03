@@ -51,6 +51,8 @@ Supported attach sections now:
 - `kprobe/<symbol>`
 - `kretprobe/<symbol>`
 
+`classifier/*` packet parser programs are loaded but skipped by the generic auto-attacher until an interface-specific TC attach path is configured. Kernel-dependent probes such as `icmp_send` may also be skipped when the symbol is unavailable; skipped modules are reported in `ebpf.skipped`.
+
 Maps whose name contains `events` are read as ring buffers and exposed as raw events through:
 
 - `GET /api/snapshot`

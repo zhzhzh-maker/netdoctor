@@ -143,6 +143,10 @@ func (c *Collector) loadAndAttach(ctx context.Context, status *model.EBPFStatus)
 		}
 		attached, label, err := attachProgram(program, programSpec.SectionName)
 		if err != nil {
+			if shouldSkipAttach(programSpec.SectionName, err) {
+				status.Skipped = append(status.Skipped, fmt.Sprintf("%s: %s", programSpec.SectionName, err))
+				continue
+			}
 			slog.Warn("skip eBPF program", "name", name, "section", programSpec.SectionName, "error", err)
 			continue
 		}
@@ -258,6 +262,16 @@ func attachProgram(program *ebpf.Program, section string) (link.Link, string, er
 	default:
 		return nil, "", fmt.Errorf("unsupported eBPF section %q", section)
 	}
+}
+
+func shouldSkipAttach(section string, err error) bool {
+	if strings.HasPrefix(section, "classifier/") || strings.HasPrefix(section, "tc/") || strings.HasPrefix(section, "xdp/") {
+		return true
+	}
+	if (section == "kprobe/icmp_send" || section == "kprobe/icmpv6_send") && strings.Contains(err.Error(), "not found") {
+		return true
+	}
+	return false
 }
 
 func (c *Collector) setStatus(status model.EBPFStatus) {
