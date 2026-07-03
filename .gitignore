@@ -3,3 +3,4 @@ bin/
 *.o
 bpf/vmlinux.h
 *.test
+webui/node_modules/

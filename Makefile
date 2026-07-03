@@ -23,8 +23,10 @@ BPF_GO_PACKAGE := ebpfcollector
 BPF_OBJECT := $(BPF_OUTPUT_DIR)/$(BPF_IDENT)_$(BPF_TARGET).o
 RUNTIME_BPF_OBJECT := $(BIN_DIR)/$(BPF_IDENT)_$(BPF_TARGET).o
 OBJECT ?= $(RUNTIME_BPF_OBJECT)
+WEBUI_DIR := webui
+WEBUI_DIST := internal/web/static/dist
 
-.PHONY: help deps build install test test-linux fmt vet tidy run probe serve bpf bpf-vmlinux clean
+.PHONY: help deps build install test test-linux fmt vet tidy run probe serve bpf bpf-vmlinux webui-build webui-deps clean
 
 help:
 	@printf '%s\n' 'netdoctor targets:'
@@ -40,13 +42,14 @@ help:
 	@printf '  %-14s %s\n' 'serve' 'start Web UI/API; pass ADDR=host:port and OBJECT=path'
 	@printf '  %-14s %s\n' 'bpf-vmlinux' 'generate bpf/vmlinux.h on Linux'
 	@printf '  %-14s %s\n' 'bpf' 'generate cilium/ebpf Go bindings with bpf2go; pass BPF_ARCH=x86 or arm64'
+	@printf '  %-14s %s\n' 'webui-build' 'build Vue/Element Plus Web UI into embedded assets'
 	@printf '  %-14s %s\n' 'clean' 'remove build/cache artifacts'
 
 deps:
 	@mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/gomod
 	$(GOENV) go mod download
 
-build:
+build: webui-build
 	@mkdir -p $(BIN_DIR) $(CACHE_DIR)/go-build $(CACHE_DIR)/gomod
 	@if [ "$$(uname -s)" = "Linux" ] && [ -r /sys/kernel/btf/vmlinux ]; then \
 		if [ ! -r "$(VMLINUX)" ]; then $(MAKE) bpf-vmlinux; fi; \
@@ -105,6 +108,12 @@ bpf: $(VMLINUX)
 		$(BPF_IDENT) $(BPF_SRC)
 	cp $(BPF_OBJECT) $(RUNTIME_BPF_OBJECT)
 	@printf 'BPF object ready: %s\n' '$(RUNTIME_BPF_OBJECT)'
+
+webui-deps:
+	cd $(WEBUI_DIR) && npm install
+
+webui-build:
+	cd $(WEBUI_DIR) && npm run build
 
 clean:
 	rm -rf $(BIN_DIR) $(CACHE_DIR)

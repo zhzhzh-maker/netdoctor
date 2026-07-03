@@ -12,12 +12,15 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
+	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 
 	"github.com/netdoctor/netdoctor/internal/model"
 )
@@ -36,7 +39,7 @@ type Collector struct {
 	status  model.EBPFStatus
 	spec    *ebpf.CollectionSpec
 	objects *ebpf.Collection
-	links   []link.Link
+	links   []io.Closer
 	readers []*ringbuf.Reader
 	cancel  context.CancelFunc
 }
@@ -281,13 +284,16 @@ func (c *Collector) attachProgram(program *ebpf.Program, section string) (link.L
 	}
 }
 
-func (c *Collector) attachTCX(program *ebpf.Program, section string) ([]link.Link, []string, []string, error) {
+func (c *Collector) attachTCX(program *ebpf.Program, section string) ([]io.Closer, []string, []string, error) {
 	var attach ebpf.AttachType
+	var legacyParent uint32
 	switch {
 	case strings.Contains(section, "ingress"):
 		attach = ebpf.AttachTCXIngress
+		legacyParent = netlink.HANDLE_MIN_INGRESS
 	case strings.Contains(section, "egress"):
 		attach = ebpf.AttachTCXEgress
+		legacyParent = netlink.HANDLE_MIN_EGRESS
 	default:
 		return nil, nil, nil, fmt.Errorf("tc classifier section must contain ingress or egress")
 	}
@@ -300,26 +306,86 @@ func (c *Collector) attachTCX(program *ebpf.Program, section string) ([]link.Lin
 		return nil, nil, nil, errors.New("tc classifier programs found no usable interfaces")
 	}
 
-	attached := make([]link.Link, 0, len(ifaces))
+	attached := make([]io.Closer, 0, len(ifaces))
 	labels := make([]string, 0, len(ifaces))
 	names := make([]string, 0, len(ifaces))
 	for _, iface := range ifaces {
+		var l io.Closer
 		l, err := link.AttachTCX(link.TCXOptions{
 			Interface: iface.Index,
 			Program:   program,
 			Attach:    attach,
 		})
 		if err != nil {
-			for _, opened := range attached {
-				_ = opened.Close()
+			l, err = attachLegacyTC(program, section, iface, legacyParent)
+			if err != nil {
+				for _, opened := range attached {
+					_ = opened.Close()
+				}
+				return nil, nil, nil, fmt.Errorf("attach %s to %s: %w", section, iface.Name, err)
 			}
-			return nil, nil, nil, fmt.Errorf("attach %s to %s: %w", section, iface.Name, err)
+			attached = append(attached, l)
+			labels = append(labels, fmt.Sprintf("%s[%s legacy-tc]", section, iface.Name))
+			names = append(names, iface.Name)
+			continue
 		}
 		attached = append(attached, l)
-		labels = append(labels, fmt.Sprintf("%s[%s]", section, iface.Name))
+		labels = append(labels, fmt.Sprintf("%s[%s tcx]", section, iface.Name))
 		names = append(names, iface.Name)
 	}
 	return attached, labels, names, nil
+}
+
+func attachLegacyTC(program *ebpf.Program, section string, iface net.Interface, parent uint32) (io.Closer, error) {
+	qdisc := &netlink.Clsact{
+		QdiscAttrs: netlink.QdiscAttrs{
+			LinkIndex: iface.Index,
+			Handle:    netlink.MakeHandle(0xffff, 0),
+			Parent:    netlink.HANDLE_CLSACT,
+		},
+	}
+	if err := netlink.QdiscAdd(qdisc); err != nil && !errors.Is(err, syscall.EEXIST) {
+		return nil, fmt.Errorf("add clsact qdisc: %w", err)
+	}
+
+	filter := &netlink.BpfFilter{
+		FilterAttrs: netlink.FilterAttrs{
+			LinkIndex: iface.Index,
+			Parent:    parent,
+			Handle:    legacyTCHandle(section),
+			Protocol:  unix.ETH_P_ALL,
+			Priority:  1,
+		},
+		Fd:           program.FD(),
+		Name:         "netdoctor_" + legacyTCDirection(section),
+		DirectAction: true,
+	}
+	if err := netlink.FilterReplace(filter); err != nil {
+		return nil, fmt.Errorf("replace bpf filter: %w", err)
+	}
+	return legacyTCLink{filter: filter}, nil
+}
+
+func legacyTCHandle(section string) uint32 {
+	if strings.Contains(section, "egress") {
+		return netlink.MakeHandle(0, 2)
+	}
+	return netlink.MakeHandle(0, 1)
+}
+
+func legacyTCDirection(section string) string {
+	if strings.Contains(section, "egress") {
+		return "egress"
+	}
+	return "ingress"
+}
+
+type legacyTCLink struct {
+	filter netlink.Filter
+}
+
+func (l legacyTCLink) Close() error {
+	return netlink.FilterDel(l.filter)
 }
 
 func shouldSkipAttach(section string, err error) bool {
