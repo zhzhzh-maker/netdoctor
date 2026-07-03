@@ -88,7 +88,8 @@ func runCollector(args []string) error {
 	protocols := fs.String("protocol", strings.Join(cfg.Protocols, ","), "comma-separated protocol filter, for example tcp,udp")
 	ifname := fs.String("ifname", cfg.Interface, "network interface for TC packet parser, for example eth0")
 	interval := fs.Duration("interval", time.Second, "event polling interval")
-	jsonLines := fs.Bool("json", false, "print events as JSON lines")
+	jsonLines := fs.Bool("json", false, "print summary snapshots as JSON")
+	showEvents := fs.Bool("events", false, "print individual decoded eBPF events")
 	webEnabled := fs.Bool("web", cfg.Web, "start the Web UI/API while tailing events")
 	addr := fs.String("addr", cfg.Listen, "HTTP listen address when -web is enabled")
 	if err := fs.Parse(args); err != nil {
@@ -136,15 +137,26 @@ func runCollector(args []string) error {
 			return err
 		case <-ticker.C:
 			snapshot := service.Snapshot()
-			for _, event := range snapshot.Events {
-				if event.Sequence <= lastSeq {
-					continue
+			if *showEvents {
+				for _, event := range snapshot.Events {
+					if event.Sequence <= lastSeq {
+						continue
+					}
+					if err := printEvent(os.Stdout, event, *jsonLines); err != nil {
+						return err
+					}
+					lastSeq = event.Sequence
 				}
-				if err := printEvent(os.Stdout, event, *jsonLines); err != nil {
+				continue
+			}
+			snapshot.Events = nil
+			if *jsonLines {
+				if err := json.NewEncoder(os.Stdout).Encode(snapshot); err != nil {
 					return err
 				}
-				lastSeq = event.Sequence
+				continue
 			}
+			printSummary(os.Stdout, snapshot)
 		}
 	}
 }
@@ -196,12 +208,12 @@ func usage() {
 
 Usage:
   netdoctor probe [-config netdoctor.yaml]
-  netdoctor run [-config netdoctor.yaml] [-protocol tcp,udp] [-ifname eth0] [-json]
+  netdoctor run [-config netdoctor.yaml] [-protocol tcp,udp] [-ifname eth0] [-json] [-events]
   netdoctor serve [-config netdoctor.yaml]
 
 Commands:
   probe   check cilium/ebpf availability and optionally attach an object once
-  run     attach an eBPF object and keep collectors running
+  run     attach an eBPF object, start the Web UI by default, and print summaries
   serve   start the optional web UI and JSON API`)
 }
 
@@ -213,7 +225,7 @@ func printRunStatus(status model.EBPFStatus) {
 	for _, section := range status.Skipped {
 		fmt.Fprintf(os.Stderr, "  skipped  %s\n", section)
 	}
-	fmt.Fprintln(os.Stderr, "waiting for events...")
+	fmt.Fprintln(os.Stderr, "waiting for traffic summaries...")
 }
 
 func splitCSV(value string) []string {
@@ -276,4 +288,98 @@ func printEvent(file *os.File, event model.NetworkEvent, asJSON bool) error {
 		event.Summary,
 	)
 	return nil
+}
+
+func printSummary(file *os.File, snapshot model.Snapshot) {
+	total := tcpTotals(snapshot.SystemTCP)
+	fmt.Fprintf(file, "%s interfaces=%d processes=%d tcp_tx=%s tcp_rx=%s retrans=%s retrans_rate=%.2f%%\n",
+		snapshot.GeneratedAt.Format(time.RFC3339),
+		len(snapshot.Interfaces),
+		len(snapshot.ProcessTraffic),
+		humanBytes(total.tx),
+		humanBytes(total.rx),
+		humanBytes(total.retrans),
+		total.rate*100,
+	)
+
+	if len(snapshot.SystemTCP) > 0 {
+		fmt.Fprintln(file, "  system tcp by interface:")
+		for _, row := range snapshot.SystemTCP {
+			name := row.Interface
+			if name == "" {
+				name = fmt.Sprintf("if%d", row.IfIndex)
+			}
+			fmt.Fprintf(file, "    %-12s tx=%-10s rx=%-10s retrans=%-10s rate=%.2f%%\n",
+				name,
+				humanBytes(row.TXBytes),
+				humanBytes(row.RXBytes),
+				humanBytes(row.RetransBytes),
+				row.RetransRate*100,
+			)
+		}
+	}
+
+	limit := 5
+	if len(snapshot.ProcessTraffic) < limit {
+		limit = len(snapshot.ProcessTraffic)
+	}
+	if limit > 0 {
+		fmt.Fprintln(file, "  top processes:")
+		for _, row := range snapshot.ProcessTraffic[:limit] {
+			fmt.Fprintf(file, "    pid=%-7d %-16s %-3s tx=%-10s rx=%-10s retrans_rate=%.2f%%\n",
+				row.PID,
+				truncate(row.Command, 16),
+				row.Protocol,
+				humanBytes(row.TXBytes),
+				humanBytes(row.RXBytes),
+				row.RetransRate*100,
+			)
+		}
+	}
+}
+
+type tcpTotal struct {
+	tx      uint64
+	rx      uint64
+	retrans uint64
+	rate    float64
+}
+
+func tcpTotals(rows []model.SystemTCPInterfaceStats) tcpTotal {
+	var total tcpTotal
+	for _, row := range rows {
+		total.tx += row.TXBytes
+		total.rx += row.RXBytes
+		total.retrans += row.RetransBytes
+	}
+	if total.tx+total.rx > 0 {
+		total.rate = float64(total.retrans) / float64(total.tx+total.rx)
+	}
+	return total
+}
+
+func humanBytes(value uint64) string {
+	const unit = 1024
+	if value < unit {
+		return fmt.Sprintf("%dB", value)
+	}
+	div, exp := uint64(unit), 0
+	for n := value / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f%ciB", float64(value)/float64(div), "KMGTPE"[exp])
+}
+
+func truncate(value string, limit int) string {
+	if value == "" {
+		return "-"
+	}
+	if len(value) <= limit {
+		return value
+	}
+	if limit <= 1 {
+		return value[:limit]
+	}
+	return value[:limit-1] + "~"
 }

@@ -35,7 +35,9 @@ func (s *Server) index(c *gin.Context) {
 }
 
 func (s *Server) snapshot(c *gin.Context) {
-	c.JSON(http.StatusOK, s.service.Snapshot())
+	snapshot := s.service.Snapshot()
+	snapshot.Events = nil
+	c.JSON(http.StatusOK, snapshot)
 }
 
 func (s *Server) events(c *gin.Context) {
@@ -47,7 +49,7 @@ func (s *Server) processes(c *gin.Context) {
 }
 
 func (s *Server) interfaces(c *gin.Context) {
-	c.JSON(http.StatusOK, s.service.Snapshot().SystemTCP)
+	c.JSON(http.StatusOK, s.service.Snapshot().Interfaces)
 }
 
 const indexHTML = `<!doctype html>
@@ -96,7 +98,7 @@ const indexHTML = `<!doctype html>
       <div class="toolbar">
         <span class="pill">{{ stamp }}</span>
         <span class="pill">attached {{ snapshot.ebpf?.attached?.length || 0 }}</span>
-        <span class="pill">events {{ events.length }}</span>
+        <span class="pill">interfaces {{ allInterfaces.length }}</span>
       </div>
     </header>
     <main>
@@ -113,7 +115,7 @@ const indexHTML = `<!doctype html>
           <canvas id="tcpChart"></canvas>
         </div>
         <div>
-          <data-table :headers="['Interface','TX','RX','Retrans','Rate']" :rows="interfaceRows"></data-table>
+          <data-table :headers="['Interface','TCP TX','TCP RX','Retrans','Rate']" :rows="tcpInterfaceRows"></data-table>
         </div>
       </section>
 
@@ -125,7 +127,7 @@ const indexHTML = `<!doctype html>
 
       <section>
         <div class="panel" style="padding:0">
-          <data-table :headers="['Time','Kind','Process','Flow','Metrics']" :rows="eventRows"></data-table>
+          <data-table :headers="['Index','Interface','State','Type','MTU','MAC','IPs']" :rows="allInterfaceRows"></data-table>
         </div>
       </section>
     </main>
@@ -149,11 +151,11 @@ const indexHTML = `<!doctype html>
         const snapshot = ref({host: {}, ebpf: {}});
         const chart = ref(null);
         const stamp = computed(() => snapshot.value.generated_at ? new Date(snapshot.value.generated_at).toLocaleString() : 'loading');
-        const events = computed(() => snapshot.value.events || []);
         const processes = computed(() => snapshot.value.process_traffic || []);
-        const interfaces = computed(() => snapshot.value.system_tcp || []);
+        const tcpInterfaces = computed(() => snapshot.value.system_tcp || []);
+        const allInterfaces = computed(() => snapshot.value.interfaces || []);
         const totalTcp = computed(() => {
-          const total = interfaces.value.reduce((acc, row) => {
+          const total = tcpInterfaces.value.reduce((acc, row) => {
             acc.tx += row.tx_bytes || 0; acc.rx += row.rx_bytes || 0; acc.retrans += row.retrans_bytes || 0; return acc;
           }, {tx: 0, rx: 0, retrans: 0});
           total.rate = total.tx + total.rx ? total.retrans / (total.tx + total.rx) : 0;
@@ -167,19 +169,20 @@ const indexHTML = `<!doctype html>
           return String(n);
         };
         const percent = n => ((Number(n || 0) * 100).toFixed(2) + '%');
-        const interfaceRows = computed(() => interfaces.value.map(r => [
+        const tcpInterfaceRows = computed(() => tcpInterfaces.value.map(r => [
           r.interface || ('if' + r.ifindex), formatBytes(r.tx_bytes), formatBytes(r.rx_bytes), formatBytes(r.retrans_bytes), percent(r.retrans_rate)
         ]));
         const processRows = computed(() => processes.value.slice(0, 100).map(r => [
           String(r.pid), r.command || '', r.protocol, formatBytes(r.tx_bytes), formatBytes(r.rx_bytes), percent(r.retrans_rate)
         ]));
-        const endpoint = e => !e ? '' : ((e.address || '') + (e.port ? ':' + e.port : ''));
-        const eventRows = computed(() => events.value.slice(-100).reverse().map(e => [
-          new Date(e.time).toLocaleTimeString(),
-          e.kind || '',
-          (e.command || '') + '<br><code>' + (e.pid || '') + '</code>',
-          '<code>' + endpoint(e.local) + ' -> ' + endpoint(e.remote) + '</code>',
-          e.summary || ''
+        const allInterfaceRows = computed(() => allInterfaces.value.map(r => [
+          String(r.index || ''),
+          r.name || '',
+          '<span class="' + (r.state === 'up' ? 'ok' : 'bad') + '">' + (r.state || '') + '</span>',
+          r.type || '',
+          String(r.mtu || ''),
+          '<code>' + (r.mac || '-') + '</code>',
+          '<code>' + ((r.ips || []).join('<br>') || '-') + '</code>'
         ]));
         const refresh = async () => {
           const res = await fetch('/api/snapshot', {cache: 'no-store'});
@@ -189,13 +192,13 @@ const indexHTML = `<!doctype html>
         };
         const renderChart = () => {
           if (typeof Chart === 'undefined') return;
-          const labels = interfaces.value.map(r => r.interface || ('if' + r.ifindex));
+          const labels = tcpInterfaces.value.map(r => r.interface || ('if' + r.ifindex));
           const data = {
             labels,
             datasets: [
-              {label: 'TCP TX', data: interfaces.value.map(r => r.tx_bytes || 0), backgroundColor: '#2563eb'},
-              {label: 'TCP RX', data: interfaces.value.map(r => r.rx_bytes || 0), backgroundColor: '#16a34a'},
-              {label: 'Retrans', data: interfaces.value.map(r => r.retrans_bytes || 0), backgroundColor: '#dc2626'}
+              {label: 'TCP TX', data: tcpInterfaces.value.map(r => r.tx_bytes || 0), backgroundColor: '#2563eb'},
+              {label: 'TCP RX', data: tcpInterfaces.value.map(r => r.rx_bytes || 0), backgroundColor: '#16a34a'},
+              {label: 'Retrans', data: tcpInterfaces.value.map(r => r.retrans_bytes || 0), backgroundColor: '#dc2626'}
             ]
           };
           if (!chart.value) {
@@ -205,7 +208,7 @@ const indexHTML = `<!doctype html>
           }
         };
         onMounted(() => { refresh(); setInterval(refresh, 2000); });
-        return { snapshot, stamp, events, processes, totalTcp, interfaceRows, processRows, eventRows, formatBytes, percent };
+        return { snapshot, stamp, processes, allInterfaces, totalTcp, tcpInterfaceRows, processRows, allInterfaceRows, formatBytes, percent };
       }
     }).mount('#app');
   </script>

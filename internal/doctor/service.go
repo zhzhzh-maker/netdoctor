@@ -57,6 +57,7 @@ func (s *Service) Snapshot() model.Snapshot {
 			Platform:    runtime.GOOS + "/" + runtime.GOARCH,
 			HealthScore: healthScore(status, findings),
 		},
+		Interfaces:     collectInterfaces(),
 		EBPF:           status,
 		Events:         events,
 		NICProtocols:   aggregateNICProtocols(events),
@@ -99,6 +100,73 @@ func (s *Service) filterEvents(events []model.NetworkEvent) []model.NetworkEvent
 		}
 	}
 	return filtered
+}
+
+func collectInterfaces() []model.Interface {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	out := make([]model.Interface, 0, len(ifaces))
+	for _, iface := range ifaces {
+		addrs, _ := iface.Addrs()
+		ips := make([]string, 0, len(addrs))
+		for _, addr := range addrs {
+			ips = append(ips, addr.String())
+		}
+		sort.Strings(ips)
+
+		state := "down"
+		if iface.Flags&net.FlagUp != 0 {
+			state = "up"
+		}
+		item := model.Interface{
+			Name:        iface.Name,
+			Index:       iface.Index,
+			Type:        interfaceType(iface),
+			State:       state,
+			MAC:         iface.HardwareAddr.String(),
+			MTU:         iface.MTU,
+			IPs:         ips,
+			HealthScore: interfaceHealth(iface),
+		}
+		out = append(out, item)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Index < out[j].Index
+	})
+	return out
+}
+
+func interfaceType(iface net.Interface) string {
+	if iface.Flags&net.FlagLoopback != 0 {
+		return "loopback"
+	}
+	name := strings.ToLower(iface.Name)
+	switch {
+	case strings.HasPrefix(name, "br"):
+		return "bridge"
+	case strings.HasPrefix(name, "bond"):
+		return "bond"
+	case strings.HasPrefix(name, "docker"):
+		return "container"
+	case strings.HasPrefix(name, "veth"):
+		return "veth"
+	case strings.Contains(name, "."):
+		return "vlan"
+	default:
+		return "ethernet"
+	}
+}
+
+func interfaceHealth(iface net.Interface) int {
+	if iface.Flags&net.FlagUp == 0 {
+		return 60
+	}
+	if iface.Flags&net.FlagRunning == 0 && iface.Flags&net.FlagLoopback == 0 {
+		return 75
+	}
+	return 100
 }
 
 func aggregateNICProtocols(events []model.NetworkEvent) []model.NICProtocolStats {
@@ -154,8 +222,9 @@ func aggregateProcessTraffic(events []model.NetworkEvent) []model.ProcessTraffic
 		protocol string
 	}
 	stats := map[key]*model.ProcessTrafficStats{}
+	selfPID := uint32(os.Getpid())
 	for _, event := range events {
-		if event.PID == 0 || event.Protocol == "" {
+		if event.PID == 0 || event.PID == selfPID || event.Protocol == "" {
 			continue
 		}
 		k := key{pid: event.PID, protocol: event.Protocol}
