@@ -78,6 +78,13 @@ make bpf-vmlinux
 make bpf
 ```
 
+`make bpf` passes `-D__TARGET_ARCH_<arch>` for libbpf tracing macros. The default is detected from `uname -m`; override it when cross-building:
+
+```bash
+make bpf BPF_ARCH=x86
+make bpf BPF_ARCH=arm64
+```
+
 The current loader can also consume a compiled object path directly, so modules can be developed independently before generated Go wrappers are committed.
 
 ## Roadmap

@@ -112,7 +112,7 @@ enum nd_direction {
 	ND_DIR_EGRESS = 2,
 };
 
-struct config {
+struct nd_config {
 	__u64 disabled_modules;
 	__u64 min_connect_us;
 	__u32 filter_by_pid;
@@ -235,8 +235,8 @@ struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
 	__uint(max_entries, 1);
 	__type(key, __u32);
-	__type(value, struct config);
-} config SEC(".maps");
+	__type(value, struct nd_config);
+} nd_config SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
@@ -273,15 +273,15 @@ struct {
 	__type(value, __u8);
 } filter_ports SEC(".maps");
 
-static __always_inline struct config *get_config(void)
+static __always_inline struct nd_config *get_config(void)
 {
 	__u32 key = 0;
-	return bpf_map_lookup_elem(&config, &key);
+	return bpf_map_lookup_elem(&nd_config, &key);
 }
 
 static __always_inline bool module_enabled(__u64 module)
 {
-	struct config *cfg = get_config();
+	struct nd_config *cfg = get_config();
 
 	if (!cfg)
 		return true;
@@ -290,7 +290,7 @@ static __always_inline bool module_enabled(__u64 module)
 
 static __always_inline bool allow_pid(__u32 pid)
 {
-	struct config *cfg = get_config();
+	struct nd_config *cfg = get_config();
 	__u8 *ok;
 
 	if (!cfg || !cfg->filter_by_pid)
@@ -301,7 +301,7 @@ static __always_inline bool allow_pid(__u32 pid)
 
 static __always_inline bool allow_port(__u16 sport, __u16 dport)
 {
-	struct config *cfg = get_config();
+	struct nd_config *cfg = get_config();
 	__u8 *ok;
 
 	if (!cfg || !cfg->filter_by_port)
@@ -391,7 +391,7 @@ static __always_inline void submit_connect_event(__u8 type, struct sock *sk,
 						 struct connect_start *start,
 						 __s32 ret)
 {
-	struct config *cfg;
+	struct nd_config *cfg;
 	struct event *event;
 	__u64 now = bpf_ktime_get_ns();
 	__u64 duration_us = 0;

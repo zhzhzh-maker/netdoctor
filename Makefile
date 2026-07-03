@@ -13,6 +13,7 @@ EVENT_LIMIT ?= 4096
 BPF_SRC := bpf/netdoctor.bpf.c
 VMLINUX := bpf/vmlinux.h
 BPF_TARGET ?= bpfel
+BPF_ARCH ?= $(shell uname -m | sed -e 's/x86_64/x86/' -e 's/aarch64/arm64/' -e 's/arm64/arm64/')
 BPF_OUTPUT_DIR := internal/collector/ebpf
 BPF_IDENT := netdoctor
 BPF_GO_PACKAGE := ebpfcollector
@@ -32,7 +33,7 @@ help:
 	@printf '  %-14s %s\n' 'run' 'attach an eBPF object; requires OBJECT=path'
 	@printf '  %-14s %s\n' 'serve' 'start Web UI/API; pass ADDR=host:port and OBJECT=path'
 	@printf '  %-14s %s\n' 'bpf-vmlinux' 'generate bpf/vmlinux.h on Linux'
-	@printf '  %-14s %s\n' 'bpf' 'generate cilium/ebpf Go bindings with bpf2go'
+	@printf '  %-14s %s\n' 'bpf' 'generate cilium/ebpf Go bindings with bpf2go; pass BPF_ARCH=x86 or arm64'
 	@printf '  %-14s %s\n' 'clean' 'remove build/cache artifacts'
 
 deps:
@@ -88,7 +89,7 @@ bpf: $(VMLINUX)
 		-target $(BPF_TARGET) \
 		-type event \
 		-cc clang \
-		-cflags "-O2 -g -I./bpf" \
+		-cflags "-O2 -g -I./bpf -D__TARGET_ARCH_$(BPF_ARCH)" \
 		-go-package $(BPF_GO_PACKAGE) \
 		-output-dir $(BPF_OUTPUT_DIR) \
 		$(BPF_IDENT) $(BPF_SRC)
