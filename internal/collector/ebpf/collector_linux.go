@@ -138,10 +138,26 @@ func (c *Collector) loadAndAttach(ctx context.Context, status *model.EBPFStatus)
 
 	c.spec = spec
 	c.objects = objects
+	status.Interfaces = nil
 
 	for name, program := range objects.Programs {
 		programSpec := spec.Programs[name]
 		if programSpec == nil {
+			continue
+		}
+		if isTCSection(programSpec.SectionName) {
+			attached, labels, ifnames, err := c.attachTCX(program, programSpec.SectionName)
+			if err != nil {
+				if shouldSkipAttach(programSpec.SectionName, err) {
+					status.Skipped = append(status.Skipped, fmt.Sprintf("%s: %s", programSpec.SectionName, err))
+					continue
+				}
+				slog.Warn("skip eBPF program", "name", name, "section", programSpec.SectionName, "error", err)
+				continue
+			}
+			c.links = append(c.links, attached...)
+			status.Attached = append(status.Attached, labels...)
+			status.Interfaces = mergeStrings(status.Interfaces, ifnames)
 			continue
 		}
 		attached, label, err := c.attachProgram(program, programSpec.SectionName)
@@ -259,17 +275,13 @@ func (c *Collector) attachProgram(program *ebpf.Program, section string) (link.L
 	case "xdp":
 		return nil, "", errors.New("xdp programs need an interface, use a dedicated module for that attach path")
 	case "tc", "classifier":
-		return c.attachTCX(program, section)
+		return nil, "", errors.New("tc classifier programs use multi-interface attach path")
 	default:
 		return nil, "", fmt.Errorf("unsupported eBPF section %q", section)
 	}
 }
 
-func (c *Collector) attachTCX(program *ebpf.Program, section string) (link.Link, string, error) {
-	if len(c.options.IfNames) == 0 {
-		return nil, "", errors.New("tc classifier programs need --ifname")
-	}
-
+func (c *Collector) attachTCX(program *ebpf.Program, section string) ([]link.Link, []string, []string, error) {
 	var attach ebpf.AttachType
 	switch {
 	case strings.Contains(section, "ingress"):
@@ -277,23 +289,37 @@ func (c *Collector) attachTCX(program *ebpf.Program, section string) (link.Link,
 	case strings.Contains(section, "egress"):
 		attach = ebpf.AttachTCXEgress
 	default:
-		return nil, "", fmt.Errorf("tc classifier section must contain ingress or egress")
+		return nil, nil, nil, fmt.Errorf("tc classifier section must contain ingress or egress")
 	}
 
-	name := c.options.IfNames[0]
-	iface, err := net.InterfaceByName(name)
+	ifaces, err := c.tcInterfaces()
 	if err != nil {
-		return nil, "", fmt.Errorf("lookup interface %s: %w", name, err)
+		return nil, nil, nil, err
 	}
-	attached, err := link.AttachTCX(link.TCXOptions{
-		Interface: iface.Index,
-		Program:   program,
-		Attach:    attach,
-	})
-	if err != nil {
-		return nil, "", fmt.Errorf("attach %s to %s: %w", section, name, err)
+	if len(ifaces) == 0 {
+		return nil, nil, nil, errors.New("tc classifier programs found no usable interfaces")
 	}
-	return attached, fmt.Sprintf("%s[%s]", section, name), nil
+
+	attached := make([]link.Link, 0, len(ifaces))
+	labels := make([]string, 0, len(ifaces))
+	names := make([]string, 0, len(ifaces))
+	for _, iface := range ifaces {
+		l, err := link.AttachTCX(link.TCXOptions{
+			Interface: iface.Index,
+			Program:   program,
+			Attach:    attach,
+		})
+		if err != nil {
+			for _, opened := range attached {
+				_ = opened.Close()
+			}
+			return nil, nil, nil, fmt.Errorf("attach %s to %s: %w", section, iface.Name, err)
+		}
+		attached = append(attached, l)
+		labels = append(labels, fmt.Sprintf("%s[%s]", section, iface.Name))
+		names = append(names, iface.Name)
+	}
+	return attached, labels, names, nil
 }
 
 func shouldSkipAttach(section string, err error) bool {
@@ -304,6 +330,63 @@ func shouldSkipAttach(section string, err error) bool {
 		return true
 	}
 	return false
+}
+
+func isTCSection(section string) bool {
+	return strings.HasPrefix(section, "classifier/") || strings.HasPrefix(section, "tc/")
+}
+
+func (c *Collector) tcInterfaces() ([]net.Interface, error) {
+	if len(c.options.IfNames) > 0 && !hasAllInterface(c.options.IfNames) {
+		out := make([]net.Interface, 0, len(c.options.IfNames))
+		for _, name := range c.options.IfNames {
+			iface, err := net.InterfaceByName(name)
+			if err != nil {
+				return nil, fmt.Errorf("lookup interface %s: %w", name, err)
+			}
+			out = append(out, *iface)
+		}
+		return out, nil
+	}
+
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil, fmt.Errorf("list interfaces: %w", err)
+	}
+	out := make([]net.Interface, 0, len(ifaces))
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		out = append(out, iface)
+	}
+	return out, nil
+}
+
+func hasAllInterface(values []string) bool {
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "all" || value == "*" {
+			return true
+		}
+	}
+	return false
+}
+
+func mergeStrings(base []string, values []string) []string {
+	seen := make(map[string]struct{}, len(base)+len(values))
+	out := make([]string, 0, len(base)+len(values))
+	for _, value := range append(base, values...) {
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func (c *Collector) setStatus(status model.EBPFStatus) {

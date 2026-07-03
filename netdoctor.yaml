@@ -3,6 +3,6 @@ object: bin/netdoctor_bpfel.o
 protocols:
   - tcp
   - udp
-interface: eth0
+interface: all
 event_limit: 4096
 web: true

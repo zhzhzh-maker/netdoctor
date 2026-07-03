@@ -292,9 +292,9 @@ func printEvent(file *os.File, event model.NetworkEvent, asJSON bool) error {
 
 func printSummary(file *os.File, snapshot model.Snapshot) {
 	total := tcpTotals(snapshot.SystemTCP)
-	fmt.Fprintf(file, "%s interfaces=%d processes=%d tcp_tx=%s tcp_rx=%s retrans=%s retrans_rate=%.2f%%\n",
+	fmt.Fprintf(file, "%s hooked_nics=%d processes=%d tcp_tx=%s tcp_rx=%s retrans=%s retrans_rate=%.2f%%\n",
 		snapshot.GeneratedAt.Format(time.RFC3339),
-		len(snapshot.Interfaces),
+		len(snapshot.SystemTCP),
 		len(snapshot.ProcessTraffic),
 		humanBytes(total.tx),
 		humanBytes(total.rx),

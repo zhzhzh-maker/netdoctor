@@ -62,7 +62,7 @@ func (s *Service) Snapshot() model.Snapshot {
 		Events:         events,
 		NICProtocols:   aggregateNICProtocols(events),
 		ProcessTraffic: aggregateProcessTraffic(events),
-		SystemTCP:      aggregateSystemTCP(events),
+		SystemTCP:      aggregateSystemTCP(events, status.Interfaces),
 		Findings:       findings,
 	}
 }
@@ -271,8 +271,18 @@ func aggregateProcessTraffic(events []model.NetworkEvent) []model.ProcessTraffic
 	return out
 }
 
-func aggregateSystemTCP(events []model.NetworkEvent) []model.SystemTCPInterfaceStats {
+func aggregateSystemTCP(events []model.NetworkEvent, attached []string) []model.SystemTCPInterfaceStats {
 	stats := map[uint32]*model.SystemTCPInterfaceStats{}
+	for _, name := range attached {
+		iface, err := net.InterfaceByName(name)
+		if err != nil {
+			continue
+		}
+		stats[uint32(iface.Index)] = &model.SystemTCPInterfaceStats{
+			IfIndex:   uint32(iface.Index),
+			Interface: iface.Name,
+		}
+	}
 	for _, event := range events {
 		if event.IfIndex == 0 || event.Protocol != "TCP" {
 			continue

@@ -53,9 +53,9 @@ Supported attach sections now:
 - `kprobe/<symbol>`
 - `kretprobe/<symbol>`
 
-`classifier/*` packet parser programs are loaded but skipped by the generic auto-attacher until an interface-specific TC attach path is configured. Kernel-dependent probes such as `icmp_send` may also be skipped when the symbol is unavailable; skipped modules are reported in `ebpf.skipped`.
+`classifier/*` packet parser programs attach through TCX. By default netdoctor discovers all up non-loopback interfaces and attaches ingress/egress hooks so per-NIC TCP/UDP totals come from eBPF packet events. Kernel-dependent probes such as `icmp_send` may also be skipped when the symbol is unavailable; skipped modules are reported in `ebpf.skipped`.
 
-Maps whose name contains `events` are read as ring buffers and exposed as raw events through:
+Maps whose name contains `events` are read as ring buffers. The default Web/API snapshot exposes summaries, while raw events are kept behind the debug events endpoint:
 
 - `GET /api/snapshot`
 - `GET /api/events`
@@ -72,12 +72,12 @@ object: bin/netdoctor_bpfel.o
 protocols:
   - tcp
   - udp
-interface: eth0
+interface: all
 event_limit: 4096
 web: true
 ```
 
-Use `interface` to attach the TC packet parser for per-interface TCP/UDP totals. Command-line flags such as `-protocol tcp,udp`, `-ifname eth0`, and `-addr 0.0.0.0:56789` override the config for one run.
+Use `interface: all` to attach the TC packet parser to every up non-loopback interface, or set a comma-separated list with `-ifname eth0,bond0` for a focused run. Command-line flags such as `-protocol tcp,udp`, `-ifname eth0,bond0`, and `-addr 0.0.0.0:56789` override the config for one run.
 
 ## BPF program workflow
 

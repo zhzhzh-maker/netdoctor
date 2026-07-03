@@ -21,6 +21,7 @@ func Default() Config {
 		Listen:     "0.0.0.0:56789",
 		Object:     "bin/netdoctor_bpfel.o",
 		Protocols:  []string{"tcp", "udp"},
+		Interface:  "all",
 		EventLimit: 4096,
 		Web:        true,
 	}

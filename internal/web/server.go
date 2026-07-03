@@ -37,6 +37,7 @@ func (s *Server) index(c *gin.Context) {
 func (s *Server) snapshot(c *gin.Context) {
 	snapshot := s.service.Snapshot()
 	snapshot.Events = nil
+	snapshot.Interfaces = nil
 	c.JSON(http.StatusOK, snapshot)
 }
 
@@ -49,7 +50,7 @@ func (s *Server) processes(c *gin.Context) {
 }
 
 func (s *Server) interfaces(c *gin.Context) {
-	c.JSON(http.StatusOK, s.service.Snapshot().Interfaces)
+	c.JSON(http.StatusOK, s.service.Snapshot().SystemTCP)
 }
 
 const indexHTML = `<!doctype html>
@@ -61,74 +62,90 @@ const indexHTML = `<!doctype html>
   <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    :root { color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { margin: 0; background: #eef2f7; color: #111827; }
-    header { height: 58px; padding: 0 22px; display: flex; align-items: center; justify-content: space-between; background: #0f172a; color: #f8fafc; }
-    h1 { margin: 0; font-size: 18px; letter-spacing: 0; }
-    main { padding: 18px 22px 28px; display: grid; gap: 16px; }
-    .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-    .pill { padding: 5px 9px; border-radius: 999px; background: #1e293b; color: #dbeafe; font-size: 12px; }
-    .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-    .panel { border: 1px solid #d7dde6; border-radius: 8px; background: #fff; padding: 14px; min-width: 0; box-shadow: 0 1px 2px rgba(15,23,42,.05); }
-    .label { color: #64748b; font-size: 12px; }
-    .value { font-size: 24px; margin-top: 6px; overflow-wrap: anywhere; }
-    .layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 460px); gap: 16px; align-items: start; }
-    table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #d7dde6; border-radius: 8px; overflow: hidden; }
-    th, td { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: left; font-size: 13px; vertical-align: top; }
-    th { color: #64748b; font-weight: 700; background: #f8fafc; }
-    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
-    .ok { color: #047857; } .bad { color: #b91c1c; }
-    .muted { color: #64748b; }
-    canvas { width: 100%; max-height: 300px; }
-    @media (max-width: 1000px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .layout { grid-template-columns: 1fr; } }
-    @media (max-width: 560px) { header, main { padding-left: 14px; padding-right: 14px; } .grid { grid-template-columns: 1fr; } }
-    @media (prefers-color-scheme: dark) {
-      body { background: #0b1120; color: #e5e7eb; }
-      .panel, table { background: #111827; border-color: #273244; }
-      th { background: #172033; color: #cbd5e1; }
-      th, td { border-bottom-color: #273244; }
-      .label, .muted { color: #94a3b8; }
-    }
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: #080c14; color: #e5edf7; }
+    #app { position: relative; min-height: 100vh; }
+    header { height: 72px; padding: 0 28px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(148,163,184,.16); background: rgba(8,12,20,.78); backdrop-filter: blur(18px); }
+    h1 { margin: 0; font-size: 20px; letter-spacing: 0; }
+    .subtitle { margin-top: 3px; color: #8ea2bd; font-size: 12px; }
+    main { padding: 22px 28px 32px; display: grid; gap: 18px; }
+    .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+    .pill { padding: 7px 10px; border: 1px solid rgba(148,163,184,.18); border-radius: 999px; background: rgba(15,23,42,.7); color: #cfe0f6; font-size: 12px; }
+    .hero { display: grid; grid-template-columns: 1.2fr .8fr; gap: 18px; align-items: stretch; }
+    .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .panel { border: 1px solid rgba(148,163,184,.16); border-radius: 8px; background: rgba(15,23,42,.78); box-shadow: 0 18px 50px rgba(0,0,0,.25); min-width: 0; overflow: hidden; }
+    .card { padding: 16px; }
+    .label { color: #8ea2bd; font-size: 12px; font-weight: 700; text-transform: uppercase; }
+    .value { font-size: 28px; margin-top: 8px; color: #f8fafc; overflow-wrap: anywhere; }
+    .hint { margin-top: 8px; color: #7dd3fc; font-size: 12px; }
+    .section-title { padding: 16px 16px 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .section-title strong { font-size: 14px; }
+    .section-title span { color: #8ea2bd; font-size: 12px; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 500px); gap: 18px; align-items: start; }
+    .chart-box { padding: 0 16px 16px; height: 360px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 12px 14px; border-bottom: 1px solid rgba(148,163,184,.12); text-align: left; font-size: 13px; vertical-align: middle; white-space: nowrap; }
+    th { color: #8ea2bd; font-weight: 700; background: rgba(30,41,59,.56); }
+    tr:last-child td { border-bottom: 0; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: #bae6fd; }
+    .muted { color: #8ea2bd; }
+    .ok { color: #34d399; }
+    .warn { color: #fbbf24; }
+    .bar { height: 8px; min-width: 100px; border-radius: 999px; background: rgba(148,163,184,.16); overflow: hidden; }
+    .bar span { display: block; height: 100%; border-radius: inherit; background: #38bdf8; }
+    canvas { width: 100%; height: 100%; }
+    @media (max-width: 1180px) { .hero, .layout { grid-template-columns: 1fr; } .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 640px) { header, main { padding-left: 14px; padding-right: 14px; } header { height: auto; min-height: 72px; align-items: flex-start; flex-direction: column; padding-top: 14px; padding-bottom: 14px; } .toolbar { justify-content: flex-start; } .kpis { grid-template-columns: 1fr; } th, td { padding: 10px; } }
   </style>
 </head>
 <body>
   <div id="app">
     <header>
-      <h1>netdoctor</h1>
+      <div>
+        <h1>netdoctor</h1>
+        <div class="subtitle">eBPF traffic diagnosis</div>
+      </div>
       <div class="toolbar">
         <span class="pill">{{ stamp }}</span>
-        <span class="pill">attached {{ snapshot.ebpf?.attached?.length || 0 }}</span>
-        <span class="pill">interfaces {{ allInterfaces.length }}</span>
+        <span class="pill">programs {{ snapshot.ebpf?.attached?.length || 0 }}</span>
+        <span class="pill">hooked NICs {{ tcpInterfaces.length }}</span>
       </div>
     </header>
     <main>
-      <section class="grid">
-        <metric-card label="Health" :value="snapshot.host?.health_score || 0"></metric-card>
-        <metric-card label="Processes" :value="processes.length"></metric-card>
-        <metric-card label="TCP TX/RX" :value="formatBytes(totalTcp.tx) + ' / ' + formatBytes(totalTcp.rx)"></metric-card>
-        <metric-card label="Retrans Rate" :value="percent(totalTcp.rate)"></metric-card>
+      <section class="hero">
+        <div class="kpis">
+          <metric-card label="Health" :value="snapshot.host?.health_score || 0" hint="collector"></metric-card>
+          <metric-card label="TCP TX" :value="formatBytes(totalTcp.tx)" hint="egress"></metric-card>
+          <metric-card label="TCP RX" :value="formatBytes(totalTcp.rx)" hint="ingress"></metric-card>
+          <metric-card label="Retrans Rate" :value="percent(totalTcp.rate)" hint="tcp"></metric-card>
+        </div>
+        <div class="panel card">
+          <div class="label">Top eBPF NIC</div>
+          <div class="value">{{ topInterface.name }}</div>
+          <div class="hint">TX {{ formatBytes(topInterface.tx) }} / RX {{ formatBytes(topInterface.rx) }}</div>
+        </div>
       </section>
 
       <section class="layout">
         <div class="panel">
-          <div class="label">System TCP By Interface</div>
-          <canvas id="tcpChart"></canvas>
+          <div class="section-title">
+            <strong>TCP Traffic By Hooked Interface</strong>
+            <span>{{ tcpInterfaces.length }} NICs</span>
+          </div>
+          <div class="chart-box"><canvas id="tcpChart"></canvas></div>
         </div>
-        <div>
+        <div class="panel">
           <data-table :headers="['Interface','TCP TX','TCP RX','Retrans','Rate']" :rows="tcpInterfaceRows"></data-table>
         </div>
       </section>
 
-      <section>
-        <div class="panel" style="padding:0">
-          <data-table :headers="['PID','Process','Proto','TX','RX','Retrans Rate']" :rows="processRows"></data-table>
+      <section class="panel">
+        <div class="section-title">
+          <strong>Process Traffic</strong>
+          <span>{{ processes.length }} processes</span>
         </div>
-      </section>
-
-      <section>
-        <div class="panel" style="padding:0">
-          <data-table :headers="['Index','Interface','State','Type','MTU','MAC','IPs']" :rows="allInterfaceRows"></data-table>
-        </div>
+        <data-table :headers="['PID','Process','Proto','TX','RX','Retrans Rate']" :rows="processRows"></data-table>
       </section>
     </main>
   </div>
@@ -136,8 +153,8 @@ const indexHTML = `<!doctype html>
     const { createApp, computed, onMounted, ref, nextTick } = Vue;
 
     const MetricCard = {
-      props: ['label', 'value'],
-      template: '<div class="panel"><div class="label">{{ label }}</div><div class="value">{{ value }}</div></div>'
+      props: ['label', 'value', 'hint'],
+      template: '<div class="panel card"><div class="label">{{ label }}</div><div class="value">{{ value }}</div><div class="hint">{{ hint }}</div></div>'
     };
 
     const DataTable = {
@@ -153,13 +170,17 @@ const indexHTML = `<!doctype html>
         const stamp = computed(() => snapshot.value.generated_at ? new Date(snapshot.value.generated_at).toLocaleString() : 'loading');
         const processes = computed(() => snapshot.value.process_traffic || []);
         const tcpInterfaces = computed(() => snapshot.value.system_tcp || []);
-        const allInterfaces = computed(() => snapshot.value.interfaces || []);
         const totalTcp = computed(() => {
           const total = tcpInterfaces.value.reduce((acc, row) => {
             acc.tx += row.tx_bytes || 0; acc.rx += row.rx_bytes || 0; acc.retrans += row.retrans_bytes || 0; return acc;
           }, {tx: 0, rx: 0, retrans: 0});
           total.rate = total.tx + total.rx ? total.retrans / (total.tx + total.rx) : 0;
           return total;
+        });
+        const topInterface = computed(() => {
+          const top = tcpInterfaces.value.slice().sort((a, b) => ((b.tx_bytes || 0) + (b.rx_bytes || 0)) - ((a.tx_bytes || 0) + (a.rx_bytes || 0)))[0];
+          if (!top) return {name: 'waiting', tx: 0, rx: 0};
+          return {name: top.interface || ('if' + top.ifindex), tx: top.tx_bytes || 0, rx: top.rx_bytes || 0};
         });
         const formatBytes = n => {
           n = Number(n || 0);
@@ -170,19 +191,14 @@ const indexHTML = `<!doctype html>
         };
         const percent = n => ((Number(n || 0) * 100).toFixed(2) + '%');
         const tcpInterfaceRows = computed(() => tcpInterfaces.value.map(r => [
-          r.interface || ('if' + r.ifindex), formatBytes(r.tx_bytes), formatBytes(r.rx_bytes), formatBytes(r.retrans_bytes), percent(r.retrans_rate)
+          '<code>' + (r.interface || ('if' + r.ifindex)) + '</code>',
+          formatBytes(r.tx_bytes),
+          formatBytes(r.rx_bytes),
+          formatBytes(r.retrans_bytes),
+          '<span class="' + (r.retrans_rate > 0.03 ? 'warn' : 'ok') + '">' + percent(r.retrans_rate) + '</span>'
         ]));
         const processRows = computed(() => processes.value.slice(0, 100).map(r => [
-          String(r.pid), r.command || '', r.protocol, formatBytes(r.tx_bytes), formatBytes(r.rx_bytes), percent(r.retrans_rate)
-        ]));
-        const allInterfaceRows = computed(() => allInterfaces.value.map(r => [
-          String(r.index || ''),
-          r.name || '',
-          '<span class="' + (r.state === 'up' ? 'ok' : 'bad') + '">' + (r.state || '') + '</span>',
-          r.type || '',
-          String(r.mtu || ''),
-          '<code>' + (r.mac || '-') + '</code>',
-          '<code>' + ((r.ips || []).join('<br>') || '-') + '</code>'
+          '<code>' + String(r.pid) + '</code>', r.command || '', r.protocol, formatBytes(r.tx_bytes), formatBytes(r.rx_bytes), percent(r.retrans_rate)
         ]));
         const refresh = async () => {
           const res = await fetch('/api/snapshot', {cache: 'no-store'});
@@ -202,13 +218,25 @@ const indexHTML = `<!doctype html>
             ]
           };
           if (!chart.value) {
-            chart.value = new Chart(document.getElementById('tcpChart'), {type: 'bar', data, options: {responsive: true, plugins: {legend: {position: 'bottom'}}, scales: {y: {beginAtZero: true}}}});
+            chart.value = new Chart(document.getElementById('tcpChart'), {
+              type: 'bar',
+              data,
+              options: {
+                maintainAspectRatio: false,
+                responsive: true,
+                plugins: {legend: {position: 'bottom', labels: {color: '#cbd5e1'}}},
+                scales: {
+                  x: {ticks: {color: '#94a3b8'}, grid: {color: 'rgba(148,163,184,.08)'}},
+                  y: {beginAtZero: true, ticks: {color: '#94a3b8'}, grid: {color: 'rgba(148,163,184,.12)'}}
+                }
+              }
+            });
           } else {
             chart.value.data = data; chart.value.update();
           }
         };
         onMounted(() => { refresh(); setInterval(refresh, 2000); });
-        return { snapshot, stamp, processes, allInterfaces, totalTcp, tcpInterfaceRows, processRows, allInterfaceRows, formatBytes, percent };
+        return { snapshot, stamp, processes, tcpInterfaces, totalTcp, topInterface, tcpInterfaceRows, processRows, formatBytes, percent };
       }
     }).mount('#app');
   </script>
