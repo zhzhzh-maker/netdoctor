@@ -235,6 +235,13 @@ struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
 	__uint(max_entries, 1);
 	__type(key, __u32);
+	__type(value, event);
+} nd_event_schema SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, __u32);
 	__type(value, struct nd_config);
 } nd_config SEC(".maps");
 
