@@ -23,6 +23,8 @@ const (
 	ndEventICMPSend       = 8
 	ndEventPacket         = 9
 	ndEventARPPacket      = 10
+	ndEventTCPSend        = 11
+	ndEventTCPRecv        = 12
 )
 
 const (
@@ -176,6 +178,10 @@ func eventTypeName(value uint8) string {
 		return "packet"
 	case ndEventARPPacket:
 		return "arp-packet"
+	case ndEventTCPSend:
+		return "tcp-send"
+	case ndEventTCPRecv:
+		return "tcp-recv"
 	default:
 		return fmt.Sprintf("event-%d", value)
 	}

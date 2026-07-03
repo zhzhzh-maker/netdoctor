@@ -3,18 +3,20 @@ package model
 import "time"
 
 type Snapshot struct {
-	GeneratedAt  time.Time          `json:"generated_at"`
-	Host         HostOverview       `json:"host"`
-	Interfaces   []Interface        `json:"interfaces"`
-	TCP          TCPStats           `json:"tcp"`
-	UDP          UDPStats           `json:"udp"`
-	ICMP         ICMPStats          `json:"icmp"`
-	Processes    []ProcessNetwork   `json:"processes"`
-	Connections  []Connection       `json:"connections"`
-	EBPF         EBPFStatus         `json:"ebpf"`
-	Events       []NetworkEvent     `json:"events,omitempty"`
-	NICProtocols []NICProtocolStats `json:"nic_protocols,omitempty"`
-	Findings     []Finding          `json:"findings"`
+	GeneratedAt    time.Time                 `json:"generated_at"`
+	Host           HostOverview              `json:"host"`
+	Interfaces     []Interface               `json:"interfaces"`
+	TCP            TCPStats                  `json:"tcp"`
+	UDP            UDPStats                  `json:"udp"`
+	ICMP           ICMPStats                 `json:"icmp"`
+	Processes      []ProcessNetwork          `json:"processes"`
+	Connections    []Connection              `json:"connections"`
+	EBPF           EBPFStatus                `json:"ebpf"`
+	Events         []NetworkEvent            `json:"events,omitempty"`
+	NICProtocols   []NICProtocolStats        `json:"nic_protocols,omitempty"`
+	ProcessTraffic []ProcessTrafficStats     `json:"process_traffic,omitempty"`
+	SystemTCP      []SystemTCPInterfaceStats `json:"system_tcp,omitempty"`
+	Findings       []Finding                 `json:"findings"`
 }
 
 type HostOverview struct {
@@ -82,6 +84,29 @@ type NICProtocolStats struct {
 	Resets       uint64 `json:"resets,omitempty"`
 	Connects     uint64 `json:"connects,omitempty"`
 	ConnectFails uint64 `json:"connect_fails,omitempty"`
+}
+
+type ProcessTrafficStats struct {
+	PID          uint32  `json:"pid"`
+	Command      string  `json:"command,omitempty"`
+	Protocol     string  `json:"protocol"`
+	RXBytes      uint64  `json:"rx_bytes"`
+	TXBytes      uint64  `json:"tx_bytes"`
+	RetransBytes uint64  `json:"retrans_bytes,omitempty"`
+	Retransmits  uint64  `json:"retransmits,omitempty"`
+	Events       uint64  `json:"events"`
+	RetransRate  float64 `json:"retrans_rate,omitempty"`
+}
+
+type SystemTCPInterfaceStats struct {
+	IfIndex      uint32  `json:"ifindex"`
+	Interface    string  `json:"interface,omitempty"`
+	TXBytes      uint64  `json:"tx_bytes"`
+	RXBytes      uint64  `json:"rx_bytes"`
+	RetransBytes uint64  `json:"retrans_bytes,omitempty"`
+	Retransmits  uint64  `json:"retransmits,omitempty"`
+	Events       uint64  `json:"events"`
+	RetransRate  float64 `json:"retrans_rate,omitempty"`
 }
 
 type TCPStats struct {

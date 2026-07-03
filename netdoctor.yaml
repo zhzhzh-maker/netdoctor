@@ -1,0 +1,8 @@
+listen: 0.0.0.0:56789
+object: bin/netdoctor_bpfel.o
+protocols:
+  - tcp
+  - udp
+interface: eth0
+event_limit: 4096
+web: true

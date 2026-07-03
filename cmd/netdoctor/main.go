@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	ndconfig "github.com/netdoctor/netdoctor/internal/config"
 	"github.com/netdoctor/netdoctor/internal/doctor"
 	"github.com/netdoctor/netdoctor/internal/model"
 	"github.com/netdoctor/netdoctor/internal/output"
@@ -49,14 +50,20 @@ func run() error {
 }
 
 func probe(args []string) error {
+	cfg, err := loadCommandConfig(args)
+	if err != nil {
+		return err
+	}
 	fs := flag.NewFlagSet("probe", flag.ExitOnError)
-	objectPath := fs.String("object", "", "optional compiled eBPF object path")
-	eventLimit := fs.Int("event-limit", 2048, "number of recent eBPF events kept in memory")
-	protocols := fs.String("protocol", "", "comma-separated protocol filter, for example tcp,udp")
-	ifname := fs.String("ifname", "", "network interface for TC packet parser, for example eth0")
+	configPath := fs.String("config", "netdoctor.yaml", "configuration file path")
+	objectPath := fs.String("object", cfg.Object, "optional compiled eBPF object path")
+	eventLimit := fs.Int("event-limit", cfg.EventLimit, "number of recent eBPF events kept in memory")
+	protocols := fs.String("protocol", strings.Join(cfg.Protocols, ","), "comma-separated protocol filter, for example tcp,udp")
+	ifname := fs.String("ifname", cfg.Interface, "network interface for TC packet parser, for example eth0")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	_ = configPath
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -70,18 +77,24 @@ func probe(args []string) error {
 }
 
 func runCollector(args []string) error {
+	cfg, err := loadCommandConfig(args)
+	if err != nil {
+		return err
+	}
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
-	objectPath := fs.String("object", "", "compiled eBPF object path")
-	eventLimit := fs.Int("event-limit", 2048, "number of recent eBPF events kept in memory")
-	protocols := fs.String("protocol", "", "comma-separated protocol filter, for example tcp,udp")
-	ifname := fs.String("ifname", "", "network interface for TC packet parser, for example eth0")
+	configPath := fs.String("config", "netdoctor.yaml", "configuration file path")
+	objectPath := fs.String("object", cfg.Object, "compiled eBPF object path")
+	eventLimit := fs.Int("event-limit", cfg.EventLimit, "number of recent eBPF events kept in memory")
+	protocols := fs.String("protocol", strings.Join(cfg.Protocols, ","), "comma-separated protocol filter, for example tcp,udp")
+	ifname := fs.String("ifname", cfg.Interface, "network interface for TC packet parser, for example eth0")
 	interval := fs.Duration("interval", time.Second, "event polling interval")
 	jsonLines := fs.Bool("json", false, "print events as JSON lines")
-	webEnabled := fs.Bool("web", true, "start the Web UI/API while tailing events")
-	addr := fs.String("addr", "0.0.0.0:56789", "HTTP listen address when -web is enabled")
+	webEnabled := fs.Bool("web", cfg.Web, "start the Web UI/API while tailing events")
+	addr := fs.String("addr", cfg.Listen, "HTTP listen address when -web is enabled")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	_ = configPath
 	if strings.TrimSpace(*objectPath) == "" {
 		return errors.New("run requires -object")
 	}
@@ -137,15 +150,21 @@ func runCollector(args []string) error {
 }
 
 func serve(args []string) error {
+	cfg, err := loadCommandConfig(args)
+	if err != nil {
+		return err
+	}
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	addr := fs.String("addr", "0.0.0.0:56789", "HTTP listen address")
-	objectPath := fs.String("object", "", "optional compiled eBPF object path")
-	eventLimit := fs.Int("event-limit", 4096, "number of recent eBPF events kept in memory")
-	protocols := fs.String("protocol", "", "comma-separated protocol filter, for example tcp,udp")
-	ifname := fs.String("ifname", "", "network interface for TC packet parser, for example eth0")
+	configPath := fs.String("config", "netdoctor.yaml", "configuration file path")
+	addr := fs.String("addr", cfg.Listen, "HTTP listen address")
+	objectPath := fs.String("object", cfg.Object, "optional compiled eBPF object path")
+	eventLimit := fs.Int("event-limit", cfg.EventLimit, "number of recent eBPF events kept in memory")
+	protocols := fs.String("protocol", strings.Join(cfg.Protocols, ","), "comma-separated protocol filter, for example tcp,udp")
+	ifname := fs.String("ifname", cfg.Interface, "network interface for TC packet parser, for example eth0")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	_ = configPath
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -176,9 +195,9 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `netdoctor
 
 Usage:
-  netdoctor probe [-object netdoctor_bpfel.o]
-  netdoctor run -object netdoctor_bpfel.o [-protocol tcp,udp] [-ifname eth0] [-json] [-addr 0.0.0.0:56789]
-  netdoctor serve [-addr 0.0.0.0:56789] [-object netdoctor_bpfel.o] [-protocol tcp,udp] [-ifname eth0]
+  netdoctor probe [-config netdoctor.yaml]
+  netdoctor run [-config netdoctor.yaml] [-protocol tcp,udp] [-ifname eth0] [-json]
+  netdoctor serve [-config netdoctor.yaml]
 
 Commands:
   probe   check cilium/ebpf availability and optionally attach an object once
@@ -209,6 +228,21 @@ func splitCSV(value string) []string {
 		}
 	}
 	return out
+}
+
+func loadCommandConfig(args []string) (ndconfig.Config, error) {
+	path := "netdoctor.yaml"
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-config" && i+1 < len(args) {
+			path = args[i+1]
+			break
+		}
+		if strings.HasPrefix(args[i], "-config=") {
+			path = strings.TrimPrefix(args[i], "-config=")
+			break
+		}
+	}
+	return ndconfig.Load(path)
 }
 
 func startWeb(service *doctor.Service, addr string) (*http.Server, <-chan error) {

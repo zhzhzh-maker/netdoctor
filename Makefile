@@ -4,12 +4,14 @@ BIN_DIR := bin
 CACHE_DIR := .cache
 GOCACHE := $(CURDIR)/$(CACHE_DIR)/go-build
 GOMODCACHE := $(CURDIR)/$(CACHE_DIR)/gomod
-GOENV := GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE)
+GOFLAGS ?= -tags=nomsgpack
+GOENV := GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE) GOFLAGS="$(GOFLAGS)"
 
 ADDR ?= 0.0.0.0:56789
 EVENT_LIMIT ?= 4096
 PROTOCOLS ?=
 IFNAME ?=
+CONFIG ?= netdoctor.yaml
 
 BPF_SRC := bpf/netdoctor.bpf.c
 VMLINUX := bpf/vmlinux.h
@@ -46,6 +48,10 @@ deps:
 
 build:
 	@mkdir -p $(BIN_DIR) $(CACHE_DIR)/go-build $(CACHE_DIR)/gomod
+	@if [ "$$(uname -s)" = "Linux" ] && [ -r /sys/kernel/btf/vmlinux ]; then \
+		if [ ! -r "$(VMLINUX)" ]; then $(MAKE) bpf-vmlinux; fi; \
+		$(MAKE) bpf BPF_ARCH=$(BPF_ARCH); \
+	fi
 	$(GOENV) go build -o $(BIN_DIR)/$(APP) $(CMD)
 
 install:
@@ -71,16 +77,16 @@ tidy:
 
 probe:
 	@mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/gomod
-	$(GOENV) go run $(CMD) probe $(if $(wildcard $(OBJECT)),-object $(OBJECT),) $(if $(PROTOCOLS),-protocol $(PROTOCOLS),) $(if $(IFNAME),-ifname $(IFNAME),) -event-limit $(EVENT_LIMIT)
+	$(GOENV) go run $(CMD) probe -config $(CONFIG) $(if $(wildcard $(OBJECT)),-object $(OBJECT),) $(if $(PROTOCOLS),-protocol $(PROTOCOLS),) $(if $(IFNAME),-ifname $(IFNAME),) -event-limit $(EVENT_LIMIT)
 
 run:
 	@test -r "$(OBJECT)" || (echo 'BPF object not found: $(OBJECT). Run make bpf BPF_ARCH=x86 first, or pass OBJECT=/path/to/file.o' >&2; exit 2)
 	@mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/gomod
-	$(GOENV) go run $(CMD) run -object $(OBJECT) $(if $(PROTOCOLS),-protocol $(PROTOCOLS),) $(if $(IFNAME),-ifname $(IFNAME),) -event-limit $(EVENT_LIMIT)
+	$(GOENV) go run $(CMD) run -config $(CONFIG) -object $(OBJECT) $(if $(PROTOCOLS),-protocol $(PROTOCOLS),) $(if $(IFNAME),-ifname $(IFNAME),) -event-limit $(EVENT_LIMIT)
 
 serve:
 	@mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/gomod
-	$(GOENV) go run $(CMD) serve -addr $(ADDR) $(if $(wildcard $(OBJECT)),-object $(OBJECT),) $(if $(PROTOCOLS),-protocol $(PROTOCOLS),) $(if $(IFNAME),-ifname $(IFNAME),) -event-limit $(EVENT_LIMIT)
+	$(GOENV) go run $(CMD) serve -config $(CONFIG) -addr $(ADDR) $(if $(wildcard $(OBJECT)),-object $(OBJECT),) $(if $(PROTOCOLS),-protocol $(PROTOCOLS),) $(if $(IFNAME),-ifname $(IFNAME),) -event-limit $(EVENT_LIMIT)
 
 bpf-vmlinux:
 	@test "$$(uname -s)" = "Linux" || (echo 'bpf-vmlinux must run on Linux' >&2; exit 2)

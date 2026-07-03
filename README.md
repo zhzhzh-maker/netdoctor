@@ -17,19 +17,19 @@ The project is intentionally built on [`github.com/cilium/ebpf`](https://github.
 ```text
 cmd/netdoctor                 CLI entrypoint
 internal/collector/ebpf       cilium/ebpf loader, attach logic, ringbuf event ingestion
+internal/config               YAML configuration loading
 internal/doctor               runtime service and snapshot aggregation
 internal/model                shared API and event models
-internal/web                  optional Web UI and JSON API
+internal/web                  Gin API and Vue dashboard
 bpf                           BPF C program templates for bpf2go
 ```
 
 ## Commands
 
 ```bash
-go run ./cmd/netdoctor probe
-go run ./cmd/netdoctor probe -object ./netdoctor_bpfel.o
-go run ./cmd/netdoctor run -object ./netdoctor_bpfel.o -protocol tcp,udp -ifname eth0
-go run ./cmd/netdoctor serve -addr 0.0.0.0:56789 -object ./netdoctor_bpfel.o -protocol tcp,udp -ifname eth0
+go run ./cmd/netdoctor probe -config netdoctor.yaml
+go run ./cmd/netdoctor run -config netdoctor.yaml
+go run ./cmd/netdoctor serve -config netdoctor.yaml
 ```
 
 The same workflows are available through `make`:
@@ -39,9 +39,11 @@ make test
 make test-linux
 make build
 make probe
-make run OBJECT=./netdoctor_bpfel.o PROTOCOLS=tcp,udp IFNAME=eth0
-make serve ADDR=0.0.0.0:56789 OBJECT=./netdoctor_bpfel.o PROTOCOLS=tcp,udp IFNAME=eth0
+sudo make run
+make serve
 ```
+
+On Linux, `make build` automatically generates `bpf/vmlinux.h` when needed, runs `bpf2go`, copies `bin/netdoctor_bpfel.o`, and builds `bin/netdoctor`.
 
 `probe` checks whether the current Linux host can create eBPF maps with `cilium/ebpf`. With `-object`, it also tries to load and attach the object.
 
@@ -57,6 +59,25 @@ Maps whose name contains `events` are read as ring buffers and exposed as raw ev
 
 - `GET /api/snapshot`
 - `GET /api/events`
+- `GET /api/processes`
+- `GET /api/interfaces`
+
+## Configuration
+
+The default config file is [netdoctor.yaml](./netdoctor.yaml):
+
+```yaml
+listen: 0.0.0.0:56789
+object: bin/netdoctor_bpfel.o
+protocols:
+  - tcp
+  - udp
+interface: eth0
+event_limit: 4096
+web: true
+```
+
+Use `interface` to attach the TC packet parser for per-interface TCP/UDP totals. Command-line flags such as `-protocol tcp,udp`, `-ifname eth0`, and `-addr 0.0.0.0:56789` override the config for one run.
 
 ## BPF program workflow
 
@@ -73,15 +94,14 @@ It is organized as protocol modules:
 
 All modules write a shared `struct event` to the `events` ring buffer. The event includes PID/TGID, command name, socket pointer, address family, IPv4/IPv6 endpoints, ports, protocol, direction, TCP states, connect latency, TCP quality fields, ICMP type/code, interface index, and packet size. Runtime knobs live in the `config` map, with PID and port filters in `filter_pids` and `filter_ports`.
 
-Typical generation flow on Linux:
+Typical flow on Linux:
 
 ```bash
-make bpf-vmlinux
-make bpf
-sudo ./bin/netdoctor run -object ./bin/netdoctor_bpfel.o
+make build
+sudo ./bin/netdoctor run -config netdoctor.yaml
 ```
 
-`run` tails decoded ring-buffer events to stdout and starts the Web UI/API on `0.0.0.0:56789` by default. Open `http://<server-ip>:56789` from a browser when firewall rules allow it. Use `-protocol tcp,udp` to focus the terminal/API/Web output, and `-ifname eth0` to attach the TC packet parser for per-interface TCP/UDP bytes and packet counts. In another terminal, create traffic such as `curl https://example.com` or `nc -u 1.1.1.1 53` to trigger TCP/UDP events. Use `-json` for JSON Lines output.
+`run` tails decoded ring-buffer events to stdout and starts the Vue dashboard / Gin API on `0.0.0.0:56789` by default. Open `http://<server-ip>:56789` from a browser when firewall rules allow it. In another terminal, create traffic such as `curl https://example.com` or `nc -u 1.1.1.1 53` to trigger TCP/UDP events. Use `-json` for JSON Lines output.
 
 `make bpf` passes `-D__TARGET_ARCH_<arch>` for libbpf tracing macros. The default is detected from `uname -m`; override it when cross-building:
 

@@ -57,10 +57,12 @@ func (s *Service) Snapshot() model.Snapshot {
 			Platform:    runtime.GOOS + "/" + runtime.GOARCH,
 			HealthScore: healthScore(status, findings),
 		},
-		EBPF:         status,
-		Events:       events,
-		NICProtocols: aggregateNICProtocols(events),
-		Findings:     findings,
+		EBPF:           status,
+		Events:         events,
+		NICProtocols:   aggregateNICProtocols(events),
+		ProcessTraffic: aggregateProcessTraffic(events),
+		SystemTCP:      aggregateSystemTCP(events),
+		Findings:       findings,
 	}
 }
 
@@ -142,6 +144,100 @@ func aggregateNICProtocols(events []model.NetworkEvent) []model.NICProtocolStats
 			return out[i].Protocol < out[j].Protocol
 		}
 		return out[i].IfIndex < out[j].IfIndex
+	})
+	return out
+}
+
+func aggregateProcessTraffic(events []model.NetworkEvent) []model.ProcessTrafficStats {
+	type key struct {
+		pid      uint32
+		protocol string
+	}
+	stats := map[key]*model.ProcessTrafficStats{}
+	for _, event := range events {
+		if event.PID == 0 || event.Protocol == "" {
+			continue
+		}
+		k := key{pid: event.PID, protocol: event.Protocol}
+		stat := stats[k]
+		if stat == nil {
+			stat = &model.ProcessTrafficStats{
+				PID:      event.PID,
+				Command:  event.Command,
+				Protocol: event.Protocol,
+			}
+			stats[k] = stat
+		}
+		if stat.Command == "" {
+			stat.Command = event.Command
+		}
+		stat.Events++
+		switch event.Kind {
+		case "tcp-send", "udp-send":
+			stat.TXBytes += event.Bytes
+		case "tcp-recv", "udp-recv":
+			stat.RXBytes += event.Bytes
+		case "tcp-retransmit":
+			stat.Retransmits++
+			stat.RetransBytes += event.Bytes
+		}
+	}
+
+	out := make([]model.ProcessTrafficStats, 0, len(stats))
+	for _, stat := range stats {
+		total := stat.TXBytes + stat.RXBytes
+		if total > 0 {
+			stat.RetransRate = float64(stat.RetransBytes) / float64(total)
+		}
+		out = append(out, *stat)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		left := out[i].RXBytes + out[i].TXBytes
+		right := out[j].RXBytes + out[j].TXBytes
+		if left == right {
+			return out[i].PID < out[j].PID
+		}
+		return left > right
+	})
+	return out
+}
+
+func aggregateSystemTCP(events []model.NetworkEvent) []model.SystemTCPInterfaceStats {
+	stats := map[uint32]*model.SystemTCPInterfaceStats{}
+	for _, event := range events {
+		if event.IfIndex == 0 || event.Protocol != "TCP" {
+			continue
+		}
+		stat := stats[event.IfIndex]
+		if stat == nil {
+			stat = &model.SystemTCPInterfaceStats{
+				IfIndex:   event.IfIndex,
+				Interface: interfaceName(event.IfIndex),
+			}
+			stats[event.IfIndex] = stat
+		}
+		stat.Events++
+		switch event.Direction {
+		case "egress":
+			stat.TXBytes += event.Bytes
+		case "ingress":
+			stat.RXBytes += event.Bytes
+		}
+		if event.Kind == "tcp-retransmit" {
+			stat.Retransmits++
+			stat.RetransBytes += event.Bytes
+		}
+	}
+	out := make([]model.SystemTCPInterfaceStats, 0, len(stats))
+	for _, stat := range stats {
+		total := stat.TXBytes + stat.RXBytes
+		if total > 0 {
+			stat.RetransRate = float64(stat.RetransBytes) / float64(total)
+		}
+		out = append(out, *stat)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Interface < out[j].Interface
 	})
 	return out
 }

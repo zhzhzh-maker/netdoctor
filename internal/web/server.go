@@ -1,9 +1,9 @@
 package web
 
 import (
-	"encoding/json"
 	"net/http"
 
+	"github.com/gin-gonic/gin"
 	"github.com/netdoctor/netdoctor/internal/doctor"
 )
 
@@ -13,12 +13,16 @@ type Server struct {
 }
 
 func New(service *doctor.Service) *Server {
-	server := &Server{service: service}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", server.index)
-	mux.HandleFunc("/api/snapshot", server.snapshot)
-	mux.HandleFunc("/api/events", server.events)
-	server.handler = mux
+	gin.SetMode(gin.ReleaseMode)
+	router := gin.New()
+	router.Use(gin.Recovery())
+
+	server := &Server{service: service, handler: router}
+	router.GET("/", server.index)
+	router.GET("/api/snapshot", server.snapshot)
+	router.GET("/api/events", server.events)
+	router.GET("/api/processes", server.processes)
+	router.GET("/api/interfaces", server.interfaces)
 	return server
 }
 
@@ -26,30 +30,24 @@ func (s *Server) Handler() http.Handler {
 	return s.handler
 }
 
-func (s *Server) index(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(indexHTML))
+func (s *Server) index(c *gin.Context) {
+	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(indexHTML))
 }
 
-func (s *Server) snapshot(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.service.Snapshot())
+func (s *Server) snapshot(c *gin.Context) {
+	c.JSON(http.StatusOK, s.service.Snapshot())
 }
 
-func (s *Server) events(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.service.Snapshot().Events)
+func (s *Server) events(c *gin.Context) {
+	c.JSON(http.StatusOK, s.service.Snapshot().Events)
 }
 
-func writeJSON(w http.ResponseWriter, value any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(value); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+func (s *Server) processes(c *gin.Context) {
+	c.JSON(http.StatusOK, s.service.Snapshot().ProcessTraffic)
+}
+
+func (s *Server) interfaces(c *gin.Context) {
+	c.JSON(http.StatusOK, s.service.Snapshot().SystemTCP)
 }
 
 const indexHTML = `<!doctype html>
@@ -58,127 +56,158 @@ const indexHTML = `<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>netdoctor</title>
+  <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { margin: 0; background: #f7f8fa; color: #15171a; }
-    header { padding: 18px 24px; border-bottom: 1px solid #d8dde3; background: #ffffff; display: flex; gap: 16px; align-items: baseline; }
-    h1 { font-size: 20px; margin: 0; letter-spacing: 0; }
-    main { padding: 20px 24px; display: grid; gap: 16px; }
+    :root { color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; background: #eef2f7; color: #111827; }
+    header { height: 58px; padding: 0 22px; display: flex; align-items: center; justify-content: space-between; background: #0f172a; color: #f8fafc; }
+    h1 { margin: 0; font-size: 18px; letter-spacing: 0; }
+    main { padding: 18px 22px 28px; display: grid; gap: 16px; }
+    .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .pill { padding: 5px 9px; border-radius: 999px; background: #1e293b; color: #dbeafe; font-size: 12px; }
     .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-    .card { border: 1px solid #d8dde3; border-radius: 8px; background: #ffffff; padding: 14px; min-width: 0; }
-    .label { color: #667085; font-size: 12px; }
+    .panel { border: 1px solid #d7dde6; border-radius: 8px; background: #fff; padding: 14px; min-width: 0; box-shadow: 0 1px 2px rgba(15,23,42,.05); }
+    .label { color: #64748b; font-size: 12px; }
     .value { font-size: 24px; margin-top: 6px; overflow-wrap: anywhere; }
-    .band { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 420px); gap: 16px; align-items: start; }
-    canvas { width: 100%; max-height: 280px; }
-    table { width: 100%; border-collapse: collapse; background: #ffffff; border: 1px solid #d8dde3; border-radius: 8px; overflow: hidden; }
-    th, td { padding: 10px 12px; border-bottom: 1px solid #e7eaee; text-align: left; font-size: 13px; vertical-align: top; }
-    th { color: #667085; font-weight: 600; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 460px); gap: 16px; align-items: start; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #d7dde6; border-radius: 8px; overflow: hidden; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: left; font-size: 13px; vertical-align: top; }
+    th { color: #64748b; font-weight: 700; background: #f8fafc; }
     code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
-    .ok { color: #087443; }
-    .bad { color: #b42318; }
-    @media (max-width: 900px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .band { grid-template-columns: 1fr; } }
+    .ok { color: #047857; } .bad { color: #b91c1c; }
+    .muted { color: #64748b; }
+    canvas { width: 100%; max-height: 300px; }
+    @media (max-width: 1000px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .layout { grid-template-columns: 1fr; } }
     @media (max-width: 560px) { header, main { padding-left: 14px; padding-right: 14px; } .grid { grid-template-columns: 1fr; } }
     @media (prefers-color-scheme: dark) {
-      body { background: #101418; color: #eef2f6; }
-      header, .card, table { background: #171c22; border-color: #303844; }
-      th, td { border-bottom-color: #28313b; }
-      .label, th { color: #aab4c0; }
+      body { background: #0b1120; color: #e5e7eb; }
+      .panel, table { background: #111827; border-color: #273244; }
+      th { background: #172033; color: #cbd5e1; }
+      th, td { border-bottom-color: #273244; }
+      .label, .muted { color: #94a3b8; }
     }
   </style>
 </head>
 <body>
-  <header><h1>netdoctor</h1><span id="stamp"></span></header>
-  <main>
-    <section class="grid">
-      <div class="card"><div class="label">Health</div><div class="value" id="health">--</div></div>
-      <div class="card"><div class="label">eBPF</div><div class="value" id="ebpf">--</div></div>
-      <div class="card"><div class="label">Attached</div><div class="value" id="attached">--</div></div>
-      <div class="card"><div class="label">Events</div><div class="value" id="eventCount">--</div></div>
-    </section>
-    <section class="band">
-      <div class="card"><canvas id="protoChart"></canvas></div>
-      <div>
-        <table>
-          <thead><tr><th>Interface</th><th>Protocol</th><th>Events</th><th>Bytes</th><th>Signals</th></tr></thead>
-          <tbody id="nicStats"></tbody>
-        </table>
+  <div id="app">
+    <header>
+      <h1>netdoctor</h1>
+      <div class="toolbar">
+        <span class="pill">{{ stamp }}</span>
+        <span class="pill">attached {{ snapshot.ebpf?.attached?.length || 0 }}</span>
+        <span class="pill">events {{ events.length }}</span>
       </div>
-    </section>
-    <section>
-      <table>
-        <thead><tr><th>Time</th><th>Kind</th><th>Process</th><th>Flow</th><th>Metrics</th><th>Summary</th></tr></thead>
-        <tbody id="events"></tbody>
-      </table>
-    </section>
-  </main>
+    </header>
+    <main>
+      <section class="grid">
+        <metric-card label="Health" :value="snapshot.host?.health_score || 0"></metric-card>
+        <metric-card label="Processes" :value="processes.length"></metric-card>
+        <metric-card label="TCP TX/RX" :value="formatBytes(totalTcp.tx) + ' / ' + formatBytes(totalTcp.rx)"></metric-card>
+        <metric-card label="Retrans Rate" :value="percent(totalTcp.rate)"></metric-card>
+      </section>
+
+      <section class="layout">
+        <div class="panel">
+          <div class="label">System TCP By Interface</div>
+          <canvas id="tcpChart"></canvas>
+        </div>
+        <div>
+          <data-table :headers="['Interface','TX','RX','Retrans','Rate']" :rows="interfaceRows"></data-table>
+        </div>
+      </section>
+
+      <section>
+        <div class="panel" style="padding:0">
+          <data-table :headers="['PID','Process','Proto','TX','RX','Retrans Rate']" :rows="processRows"></data-table>
+        </div>
+      </section>
+
+      <section>
+        <div class="panel" style="padding:0">
+          <data-table :headers="['Time','Kind','Process','Flow','Metrics']" :rows="eventRows"></data-table>
+        </div>
+      </section>
+    </main>
+  </div>
   <script>
-    let protoChart;
-    function ensureChart(rows) {
-      if (typeof Chart === 'undefined') return;
-      const labels = rows.map(r => (r.interface || ('if' + r.ifindex)) + ' ' + r.protocol);
-      const bytes = rows.map(r => r.bytes || 0);
-      const events = rows.map(r => r.events || 0);
-      const data = {
-        labels,
-        datasets: [
-          {label: 'Bytes', data: bytes, backgroundColor: '#2563eb'},
-          {label: 'Events', data: events, backgroundColor: '#16a34a'}
-        ]
-      };
-      if (!protoChart) {
-        protoChart = new Chart(document.getElementById('protoChart'), {
-          type: 'bar',
-          data,
-          options: {responsive: true, plugins: {legend: {position: 'bottom'}}, scales: {y: {beginAtZero: true}}}
+    const { createApp, computed, onMounted, ref, nextTick } = Vue;
+
+    const MetricCard = {
+      props: ['label', 'value'],
+      template: '<div class="panel"><div class="label">{{ label }}</div><div class="value">{{ value }}</div></div>'
+    };
+
+    const DataTable = {
+      props: ['headers', 'rows'],
+      template: '<table><thead><tr><th v-for="h in headers" :key="h">{{ h }}</th></tr></thead><tbody><tr v-if="!rows.length"><td :colspan="headers.length" class="muted">No data yet</td></tr><tr v-for="(row,i) in rows" :key="i"><td v-for="(cell,j) in row" :key="j" v-html="cell"></td></tr></tbody></table>'
+    };
+
+    createApp({
+      components: { MetricCard, DataTable },
+      setup() {
+        const snapshot = ref({host: {}, ebpf: {}});
+        const chart = ref(null);
+        const stamp = computed(() => snapshot.value.generated_at ? new Date(snapshot.value.generated_at).toLocaleString() : 'loading');
+        const events = computed(() => snapshot.value.events || []);
+        const processes = computed(() => snapshot.value.process_traffic || []);
+        const interfaces = computed(() => snapshot.value.system_tcp || []);
+        const totalTcp = computed(() => {
+          const total = interfaces.value.reduce((acc, row) => {
+            acc.tx += row.tx_bytes || 0; acc.rx += row.rx_bytes || 0; acc.retrans += row.retrans_bytes || 0; return acc;
+          }, {tx: 0, rx: 0, retrans: 0});
+          total.rate = total.tx + total.rx ? total.retrans / (total.tx + total.rx) : 0;
+          return total;
         });
-        return;
+        const formatBytes = n => {
+          n = Number(n || 0);
+          if (n > 1073741824) return (n / 1073741824).toFixed(1) + ' GiB';
+          if (n > 1048576) return (n / 1048576).toFixed(1) + ' MiB';
+          if (n > 1024) return (n / 1024).toFixed(1) + ' KiB';
+          return String(n);
+        };
+        const percent = n => ((Number(n || 0) * 100).toFixed(2) + '%');
+        const interfaceRows = computed(() => interfaces.value.map(r => [
+          r.interface || ('if' + r.ifindex), formatBytes(r.tx_bytes), formatBytes(r.rx_bytes), formatBytes(r.retrans_bytes), percent(r.retrans_rate)
+        ]));
+        const processRows = computed(() => processes.value.slice(0, 100).map(r => [
+          String(r.pid), r.command || '', r.protocol, formatBytes(r.tx_bytes), formatBytes(r.rx_bytes), percent(r.retrans_rate)
+        ]));
+        const endpoint = e => !e ? '' : ((e.address || '') + (e.port ? ':' + e.port : ''));
+        const eventRows = computed(() => events.value.slice(-100).reverse().map(e => [
+          new Date(e.time).toLocaleTimeString(),
+          e.kind || '',
+          (e.command || '') + '<br><code>' + (e.pid || '') + '</code>',
+          '<code>' + endpoint(e.local) + ' -> ' + endpoint(e.remote) + '</code>',
+          e.summary || ''
+        ]));
+        const refresh = async () => {
+          const res = await fetch('/api/snapshot', {cache: 'no-store'});
+          snapshot.value = await res.json();
+          await nextTick();
+          renderChart();
+        };
+        const renderChart = () => {
+          if (typeof Chart === 'undefined') return;
+          const labels = interfaces.value.map(r => r.interface || ('if' + r.ifindex));
+          const data = {
+            labels,
+            datasets: [
+              {label: 'TCP TX', data: interfaces.value.map(r => r.tx_bytes || 0), backgroundColor: '#2563eb'},
+              {label: 'TCP RX', data: interfaces.value.map(r => r.rx_bytes || 0), backgroundColor: '#16a34a'},
+              {label: 'Retrans', data: interfaces.value.map(r => r.retrans_bytes || 0), backgroundColor: '#dc2626'}
+            ]
+          };
+          if (!chart.value) {
+            chart.value = new Chart(document.getElementById('tcpChart'), {type: 'bar', data, options: {responsive: true, plugins: {legend: {position: 'bottom'}}, scales: {y: {beginAtZero: true}}}});
+          } else {
+            chart.value.data = data; chart.value.update();
+          }
+        };
+        onMounted(() => { refresh(); setInterval(refresh, 2000); });
+        return { snapshot, stamp, events, processes, totalTcp, interfaceRows, processRows, eventRows, formatBytes, percent };
       }
-      protoChart.data = data;
-      protoChart.update();
-    }
-    async function refresh() {
-      const res = await fetch('/api/snapshot', {cache: 'no-store'});
-      const data = await res.json();
-      document.getElementById('stamp').textContent = new Date(data.generated_at).toLocaleString();
-      document.getElementById('health').textContent = data.host.health_score;
-      const enabled = data.ebpf.enabled ? 'attached' : (data.ebpf.available ? 'probe' : 'off');
-      document.getElementById('ebpf').innerHTML = '<span class="' + (data.ebpf.available ? 'ok' : 'bad') + '">' + enabled + '</span>';
-      document.getElementById('attached').textContent = (data.ebpf.attached || []).length;
-      const events = data.events || [];
-      const nicRows = data.nic_protocols || [];
-      document.getElementById('eventCount').textContent = events.length;
-      const endpoint = e => {
-        if (!e) return '';
-        const addr = e.address || '';
-        const port = e.port ? ':' + e.port : '';
-        return addr + port;
-      };
-      const flow = e => {
-        const left = endpoint(e.local);
-        const right = endpoint(e.remote);
-        if (!left && !right) return '';
-        return left + ' -> ' + right;
-      };
-      const metrics = e => [
-        e.direction,
-        e.duration_us ? ('lat=' + e.duration_us + 'us') : '',
-        e.bytes ? ('bytes=' + e.bytes) : '',
-        e.old_state || e.new_state ? ((e.old_state || '-') + '->' + (e.new_state || '-')) : '',
-        e.srtt_us ? ('srtt=' + e.srtt_us + 'us') : '',
-        e.retransmits ? ('retrans=' + e.retransmits) : '',
-        e.icmp_type || e.icmp_code ? ('icmp=' + (e.icmp_type || 0) + '/' + (e.icmp_code || 0)) : ''
-      ].filter(Boolean).join(' ');
-      ensureChart(nicRows);
-      document.getElementById('nicStats').innerHTML = nicRows.map(r =>
-        '<tr><td>' + (r.interface || ('if' + r.ifindex)) + '</td><td>' + r.protocol + '</td><td>' + r.events + '</td><td>' + r.bytes + '</td><td>retrans=' + (r.retransmits || 0) + ' reset=' + (r.resets || 0) + ' conn=' + (r.connects || 0) + '/' + (r.connect_fails || 0) + '</td></tr>'
-      ).join('');
-      document.getElementById('events').innerHTML = events.slice(-80).reverse().map(e =>
-        '<tr><td>' + new Date(e.time).toLocaleTimeString() + '</td><td>' + (e.kind || '') + '<br><code>' + (e.protocol || '') + '</code></td><td>' + (e.command || '') + '<br><code>' + (e.pid || '') + '</code></td><td><code>' + flow(e) + '</code></td><td>' + metrics(e) + '</td><td>' + (e.summary || '') + '</td></tr>'
-      ).join('');
-    }
-    refresh();
-    setInterval(refresh, 2000);
+    }).mount('#app');
   </script>
 </body>
 </html>`

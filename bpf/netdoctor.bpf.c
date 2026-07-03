@@ -91,6 +91,7 @@ enum nd_module {
 	ND_MODULE_UDP = 1U << 4,
 	ND_MODULE_ICMP = 1U << 5,
 	ND_MODULE_PACKET = 1U << 6,
+	ND_MODULE_TCP_IO = 1U << 7,
 };
 
 enum nd_event_type {
@@ -104,6 +105,8 @@ enum nd_event_type {
 	ND_EVENT_ICMP_SEND = 8,
 	ND_EVENT_PACKET = 9,
 	ND_EVENT_ARP_PACKET = 10,
+	ND_EVENT_TCP_SEND = 11,
+	ND_EVENT_TCP_RECV = 12,
 };
 
 enum nd_direction {
@@ -600,6 +603,68 @@ int BPF_KPROBE(netdoctor_tcp_retransmit_skb, struct sock *sk, struct sk_buff *sk
 	if (!module_enabled(ND_MODULE_TCP_RETRANS))
 		return 0;
 	submit_sock_event(ND_EVENT_TCP_RETRANS, IPPROTO_TCP, sk, skb);
+	return 0;
+}
+
+SEC("kprobe/tcp_sendmsg")
+int BPF_KPROBE(netdoctor_tcp_sendmsg, struct sock *sk, struct msghdr *msg, size_t size)
+{
+	event *event;
+
+	if (!module_enabled(ND_MODULE_TCP_IO))
+		return 0;
+
+	event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
+	if (!event)
+		return 0;
+
+	__builtin_memset(event, 0, sizeof(*event));
+	event->ts_ns = bpf_ktime_get_ns();
+	event->type = ND_EVENT_TCP_SEND;
+	event->protocol = IPPROTO_TCP;
+	event->direction = ND_DIR_EGRESS;
+	event->bytes = size;
+	fill_process(event);
+	fill_tuple_from_sock(event, sk);
+	fill_tcp_quality(event, sk);
+
+	if (!allow_pid(event->pid) || !allow_port(event->sport, event->dport)) {
+		bpf_ringbuf_discard(event, 0);
+		return 0;
+	}
+
+	bpf_ringbuf_submit(event, 0);
+	return 0;
+}
+
+SEC("kprobe/tcp_recvmsg")
+int BPF_KPROBE(netdoctor_tcp_recvmsg, struct sock *sk, struct msghdr *msg, size_t len)
+{
+	event *event;
+
+	if (!module_enabled(ND_MODULE_TCP_IO))
+		return 0;
+
+	event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
+	if (!event)
+		return 0;
+
+	__builtin_memset(event, 0, sizeof(*event));
+	event->ts_ns = bpf_ktime_get_ns();
+	event->type = ND_EVENT_TCP_RECV;
+	event->protocol = IPPROTO_TCP;
+	event->direction = ND_DIR_INGRESS;
+	event->bytes = len;
+	fill_process(event);
+	fill_tuple_from_sock(event, sk);
+	fill_tcp_quality(event, sk);
+
+	if (!allow_pid(event->pid) || !allow_port(event->sport, event->dport)) {
+		bpf_ringbuf_discard(event, 0);
+		return 0;
+	}
+
+	bpf_ringbuf_submit(event, 0);
 	return 0;
 }
 
