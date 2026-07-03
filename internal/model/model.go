@@ -3,17 +3,18 @@ package model
 import "time"
 
 type Snapshot struct {
-	GeneratedAt time.Time        `json:"generated_at"`
-	Host        HostOverview     `json:"host"`
-	Interfaces  []Interface      `json:"interfaces"`
-	TCP         TCPStats         `json:"tcp"`
-	UDP         UDPStats         `json:"udp"`
-	ICMP        ICMPStats        `json:"icmp"`
-	Processes   []ProcessNetwork `json:"processes"`
-	Connections []Connection     `json:"connections"`
-	EBPF        EBPFStatus       `json:"ebpf"`
-	Events      []NetworkEvent   `json:"events,omitempty"`
-	Findings    []Finding        `json:"findings"`
+	GeneratedAt  time.Time          `json:"generated_at"`
+	Host         HostOverview       `json:"host"`
+	Interfaces   []Interface        `json:"interfaces"`
+	TCP          TCPStats           `json:"tcp"`
+	UDP          UDPStats           `json:"udp"`
+	ICMP         ICMPStats          `json:"icmp"`
+	Processes    []ProcessNetwork   `json:"processes"`
+	Connections  []Connection       `json:"connections"`
+	EBPF         EBPFStatus         `json:"ebpf"`
+	Events       []NetworkEvent     `json:"events,omitempty"`
+	NICProtocols []NICProtocolStats `json:"nic_protocols,omitempty"`
+	Findings     []Finding          `json:"findings"`
 }
 
 type HostOverview struct {
@@ -68,6 +69,19 @@ type InterfaceStats struct {
 	Collisions   uint64 `json:"collisions,omitempty"`
 	RXCompressed uint64 `json:"rx_compressed,omitempty"`
 	TXCompressed uint64 `json:"tx_compressed,omitempty"`
+}
+
+type NICProtocolStats struct {
+	IfIndex      uint32 `json:"ifindex"`
+	Interface    string `json:"interface,omitempty"`
+	Protocol     string `json:"protocol"`
+	Events       uint64 `json:"events"`
+	Bytes        uint64 `json:"bytes"`
+	Packets      uint64 `json:"packets"`
+	Retransmits  uint64 `json:"retransmits,omitempty"`
+	Resets       uint64 `json:"resets,omitempty"`
+	Connects     uint64 `json:"connects,omitempty"`
+	ConnectFails uint64 `json:"connect_fails,omitempty"`
 }
 
 type TCPStats struct {
@@ -140,6 +154,7 @@ type EBPFStatus struct {
 	ObjectPath    string   `json:"object_path,omitempty"`
 	Attached      []string `json:"attached,omitempty"`
 	Skipped       []string `json:"skipped,omitempty"`
+	Interfaces    []string `json:"interfaces,omitempty"`
 	Error         string   `json:"error,omitempty"`
 }
 

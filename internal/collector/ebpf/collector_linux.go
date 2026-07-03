@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"strings"
 	"sync"
@@ -24,6 +25,7 @@ import (
 type Options struct {
 	ObjectPath string
 	EventLimit int
+	IfNames    []string
 }
 
 type Collector struct {
@@ -46,6 +48,7 @@ func New(options Options) *Collector {
 		status: model.EBPFStatus{
 			Mode:       "cilium/ebpf",
 			ObjectPath: options.ObjectPath,
+			Interfaces: options.IfNames,
 		},
 	}
 }
@@ -60,6 +63,7 @@ func (c *Collector) Start(ctx context.Context) error {
 		return err
 	}
 	status.ObjectPath = c.options.ObjectPath
+	status.Interfaces = c.options.IfNames
 
 	if c.options.ObjectPath == "" {
 		status.Available = true
@@ -140,7 +144,7 @@ func (c *Collector) loadAndAttach(ctx context.Context, status *model.EBPFStatus)
 		if programSpec == nil {
 			continue
 		}
-		attached, label, err := attachProgram(program, programSpec.SectionName)
+		attached, label, err := c.attachProgram(program, programSpec.SectionName)
 		if err != nil {
 			if shouldSkipAttach(programSpec.SectionName, err) {
 				status.Skipped = append(status.Skipped, fmt.Sprintf("%s: %s", programSpec.SectionName, err))
@@ -227,7 +231,7 @@ func probeKernel() (model.EBPFStatus, error) {
 	return status, nil
 }
 
-func attachProgram(program *ebpf.Program, section string) (link.Link, string, error) {
+func (c *Collector) attachProgram(program *ebpf.Program, section string) (link.Link, string, error) {
 	parts := strings.Split(section, "/")
 	if len(parts) == 0 {
 		return nil, "", fmt.Errorf("empty section")
@@ -255,10 +259,41 @@ func attachProgram(program *ebpf.Program, section string) (link.Link, string, er
 	case "xdp":
 		return nil, "", errors.New("xdp programs need an interface, use a dedicated module for that attach path")
 	case "tc", "classifier":
-		return nil, "", errors.New("tc classifier programs need an interface and ingress/egress attach path")
+		return c.attachTCX(program, section)
 	default:
 		return nil, "", fmt.Errorf("unsupported eBPF section %q", section)
 	}
+}
+
+func (c *Collector) attachTCX(program *ebpf.Program, section string) (link.Link, string, error) {
+	if len(c.options.IfNames) == 0 {
+		return nil, "", errors.New("tc classifier programs need --ifname")
+	}
+
+	var attach ebpf.AttachType
+	switch {
+	case strings.Contains(section, "ingress"):
+		attach = ebpf.AttachTCXIngress
+	case strings.Contains(section, "egress"):
+		attach = ebpf.AttachTCXEgress
+	default:
+		return nil, "", fmt.Errorf("tc classifier section must contain ingress or egress")
+	}
+
+	name := c.options.IfNames[0]
+	iface, err := net.InterfaceByName(name)
+	if err != nil {
+		return nil, "", fmt.Errorf("lookup interface %s: %w", name, err)
+	}
+	attached, err := link.AttachTCX(link.TCXOptions{
+		Interface: iface.Index,
+		Program:   program,
+		Attach:    attach,
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("attach %s to %s: %w", section, name, err)
+	}
+	return attached, fmt.Sprintf("%s[%s]", section, name), nil
 }
 
 func shouldSkipAttach(section string, err error) bool {

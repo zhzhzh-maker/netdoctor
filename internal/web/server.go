@@ -58,6 +58,7 @@ const indexHTML = `<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>netdoctor</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     body { margin: 0; background: #f7f8fa; color: #15171a; }
@@ -68,13 +69,15 @@ const indexHTML = `<!doctype html>
     .card { border: 1px solid #d8dde3; border-radius: 8px; background: #ffffff; padding: 14px; min-width: 0; }
     .label { color: #667085; font-size: 12px; }
     .value { font-size: 24px; margin-top: 6px; overflow-wrap: anywhere; }
+    .band { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 420px); gap: 16px; align-items: start; }
+    canvas { width: 100%; max-height: 280px; }
     table { width: 100%; border-collapse: collapse; background: #ffffff; border: 1px solid #d8dde3; border-radius: 8px; overflow: hidden; }
     th, td { padding: 10px 12px; border-bottom: 1px solid #e7eaee; text-align: left; font-size: 13px; vertical-align: top; }
     th { color: #667085; font-weight: 600; }
     code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
     .ok { color: #087443; }
     .bad { color: #b42318; }
-    @media (max-width: 900px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 900px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .band { grid-template-columns: 1fr; } }
     @media (max-width: 560px) { header, main { padding-left: 14px; padding-right: 14px; } .grid { grid-template-columns: 1fr; } }
     @media (prefers-color-scheme: dark) {
       body { background: #101418; color: #eef2f6; }
@@ -93,6 +96,15 @@ const indexHTML = `<!doctype html>
       <div class="card"><div class="label">Attached</div><div class="value" id="attached">--</div></div>
       <div class="card"><div class="label">Events</div><div class="value" id="eventCount">--</div></div>
     </section>
+    <section class="band">
+      <div class="card"><canvas id="protoChart"></canvas></div>
+      <div>
+        <table>
+          <thead><tr><th>Interface</th><th>Protocol</th><th>Events</th><th>Bytes</th><th>Signals</th></tr></thead>
+          <tbody id="nicStats"></tbody>
+        </table>
+      </div>
+    </section>
     <section>
       <table>
         <thead><tr><th>Time</th><th>Kind</th><th>Process</th><th>Flow</th><th>Metrics</th><th>Summary</th></tr></thead>
@@ -101,6 +113,30 @@ const indexHTML = `<!doctype html>
     </section>
   </main>
   <script>
+    let protoChart;
+    function ensureChart(rows) {
+      if (typeof Chart === 'undefined') return;
+      const labels = rows.map(r => (r.interface || ('if' + r.ifindex)) + ' ' + r.protocol);
+      const bytes = rows.map(r => r.bytes || 0);
+      const events = rows.map(r => r.events || 0);
+      const data = {
+        labels,
+        datasets: [
+          {label: 'Bytes', data: bytes, backgroundColor: '#2563eb'},
+          {label: 'Events', data: events, backgroundColor: '#16a34a'}
+        ]
+      };
+      if (!protoChart) {
+        protoChart = new Chart(document.getElementById('protoChart'), {
+          type: 'bar',
+          data,
+          options: {responsive: true, plugins: {legend: {position: 'bottom'}}, scales: {y: {beginAtZero: true}}}
+        });
+        return;
+      }
+      protoChart.data = data;
+      protoChart.update();
+    }
     async function refresh() {
       const res = await fetch('/api/snapshot', {cache: 'no-store'});
       const data = await res.json();
@@ -110,6 +146,7 @@ const indexHTML = `<!doctype html>
       document.getElementById('ebpf').innerHTML = '<span class="' + (data.ebpf.available ? 'ok' : 'bad') + '">' + enabled + '</span>';
       document.getElementById('attached').textContent = (data.ebpf.attached || []).length;
       const events = data.events || [];
+      const nicRows = data.nic_protocols || [];
       document.getElementById('eventCount').textContent = events.length;
       const endpoint = e => {
         if (!e) return '';
@@ -132,6 +169,10 @@ const indexHTML = `<!doctype html>
         e.retransmits ? ('retrans=' + e.retransmits) : '',
         e.icmp_type || e.icmp_code ? ('icmp=' + (e.icmp_type || 0) + '/' + (e.icmp_code || 0)) : ''
       ].filter(Boolean).join(' ');
+      ensureChart(nicRows);
+      document.getElementById('nicStats').innerHTML = nicRows.map(r =>
+        '<tr><td>' + (r.interface || ('if' + r.ifindex)) + '</td><td>' + r.protocol + '</td><td>' + r.events + '</td><td>' + r.bytes + '</td><td>retrans=' + (r.retransmits || 0) + ' reset=' + (r.resets || 0) + ' conn=' + (r.connects || 0) + '/' + (r.connect_fails || 0) + '</td></tr>'
+      ).join('');
       document.getElementById('events').innerHTML = events.slice(-80).reverse().map(e =>
         '<tr><td>' + new Date(e.time).toLocaleTimeString() + '</td><td>' + (e.kind || '') + '<br><code>' + (e.protocol || '') + '</code></td><td>' + (e.command || '') + '<br><code>' + (e.pid || '') + '</code></td><td><code>' + flow(e) + '</code></td><td>' + metrics(e) + '</td><td>' + (e.summary || '') + '</td></tr>'
       ).join('');

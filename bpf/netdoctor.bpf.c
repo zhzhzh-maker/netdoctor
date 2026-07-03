@@ -368,7 +368,20 @@ static __always_inline void fill_tcp_quality(event *event, struct sock *sk)
 	event->rto_us = rto;
 }
 
-static __always_inline bool submit_sock_event(__u8 type, __u8 protocol, struct sock *sk)
+static __always_inline void fill_ifindex_from_skb(event *event, struct sk_buff *skb)
+{
+	struct net_device *dev;
+
+	if (!skb)
+		return;
+	dev = BPF_CORE_READ(skb, dev);
+	if (!dev)
+		return;
+	event->ifindex = BPF_CORE_READ(dev, ifindex);
+}
+
+static __always_inline bool submit_sock_event(__u8 type, __u8 protocol, struct sock *sk,
+					      struct sk_buff *skb)
 {
 	event *event;
 
@@ -382,6 +395,7 @@ static __always_inline bool submit_sock_event(__u8 type, __u8 protocol, struct s
 	event->protocol = protocol;
 	fill_process(event);
 	fill_tuple_from_sock(event, sk);
+	fill_ifindex_from_skb(event, skb);
 	if (protocol == IPPROTO_TCP)
 		fill_tcp_quality(event, sk);
 
@@ -581,11 +595,11 @@ int netdoctor_tcp_set_state(struct trace_event_raw_inet_sock_set_state *ctx)
 }
 
 SEC("kprobe/tcp_retransmit_skb")
-int BPF_KPROBE(netdoctor_tcp_retransmit_skb, struct sock *sk)
+int BPF_KPROBE(netdoctor_tcp_retransmit_skb, struct sock *sk, struct sk_buff *skb)
 {
 	if (!module_enabled(ND_MODULE_TCP_RETRANS))
 		return 0;
-	submit_sock_event(ND_EVENT_TCP_RETRANS, IPPROTO_TCP, sk);
+	submit_sock_event(ND_EVENT_TCP_RETRANS, IPPROTO_TCP, sk, skb);
 	return 0;
 }
 
@@ -594,7 +608,7 @@ int BPF_KPROBE(netdoctor_tcp_send_active_reset, struct sock *sk)
 {
 	if (!module_enabled(ND_MODULE_TCP_RESET))
 		return 0;
-	submit_sock_event(ND_EVENT_TCP_RESET, IPPROTO_TCP, sk);
+	submit_sock_event(ND_EVENT_TCP_RESET, IPPROTO_TCP, sk, 0);
 	return 0;
 }
 

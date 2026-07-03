@@ -12,6 +12,7 @@ import (
 type Options struct {
 	ObjectPath string
 	EventLimit int
+	IfNames    []string
 }
 
 type Collector struct {

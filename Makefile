@@ -8,6 +8,8 @@ GOENV := GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE)
 
 ADDR ?= 0.0.0.0:56789
 EVENT_LIMIT ?= 4096
+PROTOCOLS ?=
+IFNAME ?=
 
 BPF_SRC := bpf/netdoctor.bpf.c
 VMLINUX := bpf/vmlinux.h
@@ -69,16 +71,16 @@ tidy:
 
 probe:
 	@mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/gomod
-	$(GOENV) go run $(CMD) probe $(if $(wildcard $(OBJECT)),-object $(OBJECT),) -event-limit $(EVENT_LIMIT)
+	$(GOENV) go run $(CMD) probe $(if $(wildcard $(OBJECT)),-object $(OBJECT),) $(if $(PROTOCOLS),-protocol $(PROTOCOLS),) $(if $(IFNAME),-ifname $(IFNAME),) -event-limit $(EVENT_LIMIT)
 
 run:
 	@test -r "$(OBJECT)" || (echo 'BPF object not found: $(OBJECT). Run make bpf BPF_ARCH=x86 first, or pass OBJECT=/path/to/file.o' >&2; exit 2)
 	@mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/gomod
-	$(GOENV) go run $(CMD) run -object $(OBJECT) -event-limit $(EVENT_LIMIT)
+	$(GOENV) go run $(CMD) run -object $(OBJECT) $(if $(PROTOCOLS),-protocol $(PROTOCOLS),) $(if $(IFNAME),-ifname $(IFNAME),) -event-limit $(EVENT_LIMIT)
 
 serve:
 	@mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/gomod
-	$(GOENV) go run $(CMD) serve -addr $(ADDR) $(if $(wildcard $(OBJECT)),-object $(OBJECT),) -event-limit $(EVENT_LIMIT)
+	$(GOENV) go run $(CMD) serve -addr $(ADDR) $(if $(wildcard $(OBJECT)),-object $(OBJECT),) $(if $(PROTOCOLS),-protocol $(PROTOCOLS),) $(if $(IFNAME),-ifname $(IFNAME),) -event-limit $(EVENT_LIMIT)
 
 bpf-vmlinux:
 	@test "$$(uname -s)" = "Linux" || (echo 'bpf-vmlinux must run on Linux' >&2; exit 2)

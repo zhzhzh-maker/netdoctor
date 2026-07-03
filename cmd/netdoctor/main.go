@@ -52,6 +52,8 @@ func probe(args []string) error {
 	fs := flag.NewFlagSet("probe", flag.ExitOnError)
 	objectPath := fs.String("object", "", "optional compiled eBPF object path")
 	eventLimit := fs.Int("event-limit", 2048, "number of recent eBPF events kept in memory")
+	protocols := fs.String("protocol", "", "comma-separated protocol filter, for example tcp,udp")
+	ifname := fs.String("ifname", "", "network interface for TC packet parser, for example eth0")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -59,7 +61,7 @@ func probe(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	service := doctor.New(doctor.Options{ObjectPath: *objectPath, EventLimit: *eventLimit})
+	service := doctor.New(doctor.Options{ObjectPath: *objectPath, EventLimit: *eventLimit, Protocols: splitCSV(*protocols), IfNames: splitCSV(*ifname)})
 	if err := service.Start(ctx); err != nil {
 		return output.JSON(os.Stdout, service.Snapshot())
 	}
@@ -71,6 +73,8 @@ func runCollector(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	objectPath := fs.String("object", "", "compiled eBPF object path")
 	eventLimit := fs.Int("event-limit", 2048, "number of recent eBPF events kept in memory")
+	protocols := fs.String("protocol", "", "comma-separated protocol filter, for example tcp,udp")
+	ifname := fs.String("ifname", "", "network interface for TC packet parser, for example eth0")
 	interval := fs.Duration("interval", time.Second, "event polling interval")
 	jsonLines := fs.Bool("json", false, "print events as JSON lines")
 	webEnabled := fs.Bool("web", true, "start the Web UI/API while tailing events")
@@ -85,7 +89,7 @@ func runCollector(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	service := doctor.New(doctor.Options{ObjectPath: *objectPath, EventLimit: *eventLimit})
+	service := doctor.New(doctor.Options{ObjectPath: *objectPath, EventLimit: *eventLimit, Protocols: splitCSV(*protocols), IfNames: splitCSV(*ifname)})
 	if err := service.Start(ctx); err != nil {
 		return err
 	}
@@ -137,6 +141,8 @@ func serve(args []string) error {
 	addr := fs.String("addr", "0.0.0.0:56789", "HTTP listen address")
 	objectPath := fs.String("object", "", "optional compiled eBPF object path")
 	eventLimit := fs.Int("event-limit", 4096, "number of recent eBPF events kept in memory")
+	protocols := fs.String("protocol", "", "comma-separated protocol filter, for example tcp,udp")
+	ifname := fs.String("ifname", "", "network interface for TC packet parser, for example eth0")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -144,7 +150,7 @@ func serve(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	service := doctor.New(doctor.Options{ObjectPath: *objectPath, EventLimit: *eventLimit})
+	service := doctor.New(doctor.Options{ObjectPath: *objectPath, EventLimit: *eventLimit, Protocols: splitCSV(*protocols), IfNames: splitCSV(*ifname)})
 	if err := service.Start(ctx); err != nil {
 		return err
 	}
@@ -171,8 +177,8 @@ func usage() {
 
 Usage:
   netdoctor probe [-object netdoctor_bpfel.o]
-  netdoctor run -object netdoctor_bpfel.o [-json] [-addr 0.0.0.0:56789]
-  netdoctor serve [-addr 0.0.0.0:56789] [-object netdoctor_bpfel.o]
+  netdoctor run -object netdoctor_bpfel.o [-protocol tcp,udp] [-ifname eth0] [-json] [-addr 0.0.0.0:56789]
+  netdoctor serve [-addr 0.0.0.0:56789] [-object netdoctor_bpfel.o] [-protocol tcp,udp] [-ifname eth0]
 
 Commands:
   probe   check cilium/ebpf availability and optionally attach an object once
@@ -189,6 +195,20 @@ func printRunStatus(status model.EBPFStatus) {
 		fmt.Fprintf(os.Stderr, "  skipped  %s\n", section)
 	}
 	fmt.Fprintln(os.Stderr, "waiting for events...")
+}
+
+func splitCSV(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(value, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func startWeb(service *doctor.Service, addr string) (*http.Server, <-chan error) {
