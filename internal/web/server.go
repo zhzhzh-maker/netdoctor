@@ -95,7 +95,7 @@ const indexHTML = `<!doctype html>
     </section>
     <section>
       <table>
-        <thead><tr><th>Time</th><th>Kind</th><th>Source</th><th>CPU</th><th>Raw</th></tr></thead>
+        <thead><tr><th>Time</th><th>Kind</th><th>Process</th><th>Flow</th><th>Metrics</th><th>Summary</th></tr></thead>
         <tbody id="events"></tbody>
       </table>
     </section>
@@ -111,8 +111,29 @@ const indexHTML = `<!doctype html>
       document.getElementById('attached').textContent = (data.ebpf.attached || []).length;
       const events = data.events || [];
       document.getElementById('eventCount').textContent = events.length;
+      const endpoint = e => {
+        if (!e) return '';
+        const addr = e.address || '';
+        const port = e.port ? ':' + e.port : '';
+        return addr + port;
+      };
+      const flow = e => {
+        const left = endpoint(e.local);
+        const right = endpoint(e.remote);
+        if (!left && !right) return '';
+        return left + ' -> ' + right;
+      };
+      const metrics = e => [
+        e.direction,
+        e.duration_us ? ('lat=' + e.duration_us + 'us') : '',
+        e.bytes ? ('bytes=' + e.bytes) : '',
+        e.old_state || e.new_state ? ((e.old_state || '-') + '->' + (e.new_state || '-')) : '',
+        e.srtt_us ? ('srtt=' + e.srtt_us + 'us') : '',
+        e.retransmits ? ('retrans=' + e.retransmits) : '',
+        e.icmp_type || e.icmp_code ? ('icmp=' + (e.icmp_type || 0) + '/' + (e.icmp_code || 0)) : ''
+      ].filter(Boolean).join(' ');
       document.getElementById('events').innerHTML = events.slice(-80).reverse().map(e =>
-        '<tr><td>' + new Date(e.time).toLocaleTimeString() + '</td><td>' + (e.kind || '') + '</td><td>' + (e.source || '') + '</td><td>' + (e.cpu || 0) + '</td><td><code>' + (e.raw || '') + '</code></td></tr>'
+        '<tr><td>' + new Date(e.time).toLocaleTimeString() + '</td><td>' + (e.kind || '') + '<br><code>' + (e.protocol || '') + '</code></td><td>' + (e.command || '') + '<br><code>' + (e.pid || '') + '</code></td><td><code>' + flow(e) + '</code></td><td>' + metrics(e) + '</td><td>' + (e.summary || '') + '</td></tr>'
       ).join('');
     }
     refresh();

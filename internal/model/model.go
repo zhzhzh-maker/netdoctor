@@ -148,15 +148,30 @@ type NetworkEvent struct {
 	Time      time.Time `json:"time"`
 	Source    string    `json:"source"`
 	Kind      string    `json:"kind"`
+	Summary   string    `json:"summary,omitempty"`
 	CPU       int       `json:"cpu,omitempty"`
 	PID       uint32    `json:"pid,omitempty"`
+	TGID      uint32    `json:"tgid,omitempty"`
 	Command   string    `json:"command,omitempty"`
 	Protocol  string    `json:"protocol,omitempty"`
 	Direction string    `json:"direction,omitempty"`
+	IfIndex   uint32    `json:"ifindex,omitempty"`
 	Local     Endpoint  `json:"local,omitempty"`
 	Remote    Endpoint  `json:"remote,omitempty"`
 	Bytes     uint64    `json:"bytes,omitempty"`
 	Packets   uint64    `json:"packets,omitempty"`
+	Duration  uint64    `json:"duration_us,omitempty"`
+	Ret       int32     `json:"ret,omitempty"`
+	OldState  string    `json:"old_state,omitempty"`
+	NewState  string    `json:"new_state,omitempty"`
+	SRTT      uint32    `json:"srtt_us,omitempty"`
+	RTO       uint32    `json:"rto_us,omitempty"`
+	CWND      uint32    `json:"cwnd,omitempty"`
+	SSThresh  uint32    `json:"ssthresh,omitempty"`
+	Retrans   uint32    `json:"retransmits,omitempty"`
+	ICMPType  uint8     `json:"icmp_type,omitempty"`
+	ICMPCode  uint8     `json:"icmp_code,omitempty"`
+	EthProto  string    `json:"eth_proto,omitempty"`
 	Reason    string    `json:"reason,omitempty"`
 	Raw       string    `json:"raw,omitempty"`
 }

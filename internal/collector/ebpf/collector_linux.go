@@ -4,7 +4,6 @@ package ebpfcollector
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -190,12 +189,10 @@ func (c *Collector) readRing(ctx context.Context, name string, reader *ringbuf.R
 			continue
 		}
 
-		c.events.add(model.NetworkEvent{
-			Time:   time.Now(),
-			Source: name,
-			Kind:   "raw-ebpf-event",
-			Raw:    hex.EncodeToString(record.RawSample),
-		})
+		event := decodeRawEvent(record.RawSample)
+		event.Time = time.Now()
+		event.Source = name
+		c.events.add(event)
 	}
 }
 

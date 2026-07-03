@@ -216,12 +216,10 @@ func printEvent(file *os.File, event model.NetworkEvent, asJSON bool) error {
 		return enc.Encode(event)
 	}
 
-	fmt.Fprintf(file, "%s seq=%d kind=%s source=%s raw=%s\n",
+	fmt.Fprintf(file, "%s seq=%d %s\n",
 		event.Time.Format(time.RFC3339),
 		event.Sequence,
-		event.Kind,
-		event.Source,
-		event.Raw,
+		event.Summary,
 	)
 	return nil
 }
