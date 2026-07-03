@@ -128,7 +128,7 @@ struct connect_start {
 	char comm[TASK_COMM_LEN];
 };
 
-struct event {
+typedef struct event {
 	__u64 ts_ns;
 	__u64 skaddr;
 	__u64 duration_us;
@@ -166,7 +166,7 @@ struct event {
 	__u8 icmp_code;
 
 	char comm[TASK_COMM_LEN];
-};
+} event;
 
 struct nd_ethhdr {
 	__u8 dst[6];
@@ -313,7 +313,7 @@ static __always_inline bool allow_port(__u16 sport, __u16 dport)
 	return ok != 0;
 }
 
-static __always_inline void fill_process(struct event *event)
+static __always_inline void fill_process(event *event)
 {
 	__u64 pid_tgid = bpf_get_current_pid_tgid();
 
@@ -322,7 +322,7 @@ static __always_inline void fill_process(struct event *event)
 	bpf_get_current_comm(event->comm, sizeof(event->comm));
 }
 
-static __always_inline void fill_tuple_from_sock(struct event *event, struct sock *sk)
+static __always_inline void fill_tuple_from_sock(event *event, struct sock *sk)
 {
 	__u16 family = BPF_CORE_READ(sk, __sk_common.skc_family);
 	__u16 sport = BPF_CORE_READ(sk, __sk_common.skc_num);
@@ -344,7 +344,7 @@ static __always_inline void fill_tuple_from_sock(struct event *event, struct soc
 	}
 }
 
-static __always_inline void fill_tcp_quality(struct event *event, struct sock *sk)
+static __always_inline void fill_tcp_quality(event *event, struct sock *sk)
 {
 	struct tcp_sock *tp = (struct tcp_sock *)sk;
 	struct inet_connection_sock *icsk = (struct inet_connection_sock *)sk;
@@ -363,7 +363,7 @@ static __always_inline void fill_tcp_quality(struct event *event, struct sock *s
 
 static __always_inline bool submit_sock_event(__u8 type, __u8 protocol, struct sock *sk)
 {
-	struct event *event;
+	event *event;
 
 	event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
 	if (!event)
@@ -392,7 +392,7 @@ static __always_inline void submit_connect_event(__u8 type, struct sock *sk,
 						 __s32 ret)
 {
 	struct nd_config *cfg;
-	struct event *event;
+	event *event;
 	__u64 now = bpf_ktime_get_ns();
 	__u64 duration_us = 0;
 
@@ -530,7 +530,7 @@ SEC("tracepoint/sock/inet_sock_set_state")
 int netdoctor_tcp_set_state(struct trace_event_raw_inet_sock_set_state *ctx)
 {
 	struct sock *sk = (struct sock *)ctx->skaddr;
-	struct event *event;
+	event *event;
 	__u64 *last_ts;
 	__u64 now;
 
@@ -593,7 +593,7 @@ int BPF_KPROBE(netdoctor_tcp_send_active_reset, struct sock *sk)
 
 static __always_inline int trace_udp(struct sock *sk, __u64 len, __u8 type)
 {
-	struct event *event;
+	event *event;
 
 	if (!module_enabled(ND_MODULE_UDP))
 		return 0;
@@ -647,7 +647,7 @@ int BPF_KPROBE(netdoctor_udpv6_recvmsg, struct sock *sk, struct msghdr *msg, uns
 SEC("kprobe/icmp_send")
 int BPF_KPROBE(netdoctor_icmp_send, struct sk_buff *skb, int type, int code)
 {
-	struct event *event;
+	event *event;
 
 	if (!module_enabled(ND_MODULE_ICMP))
 		return 0;
@@ -671,7 +671,7 @@ int BPF_KPROBE(netdoctor_icmp_send, struct sk_buff *skb, int type, int code)
 SEC("kprobe/icmpv6_send")
 int BPF_KPROBE(netdoctor_icmpv6_send, struct sk_buff *skb, int type, int code)
 {
-	struct event *event;
+	event *event;
 
 	if (!module_enabled(ND_MODULE_ICMP))
 		return 0;
@@ -696,7 +696,7 @@ static __always_inline int submit_packet_event(struct __sk_buff *skb, __u8 direc
 {
 	struct nd_ethhdr eth;
 	struct nd_vlanhdr vlan;
-	struct event *event;
+	event *event;
 	__u16 eth_proto;
 	__u32 off = sizeof(eth);
 	__u8 protocol = 0;
