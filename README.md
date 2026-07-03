@@ -29,7 +29,7 @@ bpf                           BPF C program templates for bpf2go
 go run ./cmd/netdoctor probe
 go run ./cmd/netdoctor probe -object ./netdoctor_bpfel.o
 go run ./cmd/netdoctor run -object ./netdoctor_bpfel.o
-go run ./cmd/netdoctor serve -addr 127.0.0.1:8080 -object ./netdoctor_bpfel.o
+go run ./cmd/netdoctor serve -addr 0.0.0.0:56789 -object ./netdoctor_bpfel.o
 ```
 
 The same workflows are available through `make`:
@@ -40,7 +40,7 @@ make test-linux
 make build
 make probe
 make run OBJECT=./netdoctor_bpfel.o
-make serve ADDR=127.0.0.1:8080 OBJECT=./netdoctor_bpfel.o
+make serve ADDR=0.0.0.0:56789 OBJECT=./netdoctor_bpfel.o
 ```
 
 `probe` checks whether the current Linux host can create eBPF maps with `cilium/ebpf`. With `-object`, it also tries to load and attach the object.
@@ -81,7 +81,7 @@ make bpf
 sudo ./bin/netdoctor run -object ./bin/netdoctor_bpfel.o
 ```
 
-`run` tails new ring-buffer events to stdout and starts the Web UI/API on port `56789` by default. Open `http://127.0.0.1:56789` locally, or `http://<server-ip>:56789` from another machine when firewall rules allow it. In another terminal, create traffic such as `curl https://example.com` or `nc -u 1.1.1.1 53` to trigger TCP/UDP events. Use `-json` for JSON Lines output.
+`run` tails new ring-buffer events to stdout and starts the Web UI/API on `0.0.0.0:56789` by default. Open `http://<server-ip>:56789` from a browser when firewall rules allow it. In another terminal, create traffic such as `curl https://example.com` or `nc -u 1.1.1.1 53` to trigger TCP/UDP events. Use `-json` for JSON Lines output.
 
 `make bpf` passes `-D__TARGET_ARCH_<arch>` for libbpf tracing macros. The default is detected from `uname -m`; override it when cross-building:
 

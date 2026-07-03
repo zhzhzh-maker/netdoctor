@@ -74,7 +74,7 @@ func runCollector(args []string) error {
 	interval := fs.Duration("interval", time.Second, "event polling interval")
 	jsonLines := fs.Bool("json", false, "print events as JSON lines")
 	webEnabled := fs.Bool("web", true, "start the Web UI/API while tailing events")
-	addr := fs.String("addr", ":56789", "HTTP listen address when -web is enabled")
+	addr := fs.String("addr", "0.0.0.0:56789", "HTTP listen address when -web is enabled")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -134,7 +134,7 @@ func runCollector(args []string) error {
 
 func serve(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	addr := fs.String("addr", ":56789", "HTTP listen address")
+	addr := fs.String("addr", "0.0.0.0:56789", "HTTP listen address")
 	objectPath := fs.String("object", "", "optional compiled eBPF object path")
 	eventLimit := fs.Int("event-limit", 4096, "number of recent eBPF events kept in memory")
 	if err := fs.Parse(args); err != nil {
@@ -171,8 +171,8 @@ func usage() {
 
 Usage:
   netdoctor probe [-object netdoctor_bpfel.o]
-  netdoctor run -object netdoctor_bpfel.o [-json] [-addr :56789]
-  netdoctor serve [-addr :56789] [-object netdoctor_bpfel.o]
+  netdoctor run -object netdoctor_bpfel.o [-json] [-addr 0.0.0.0:56789]
+  netdoctor serve [-addr 0.0.0.0:56789] [-object netdoctor_bpfel.o]
 
 Commands:
   probe   check cilium/ebpf availability and optionally attach an object once
@@ -205,7 +205,7 @@ func startWeb(service *doctor.Service, addr string) (*http.Server, <-chan error)
 
 func displayURL(addr string) string {
 	if strings.HasPrefix(addr, ":") {
-		return "http://127.0.0.1" + addr
+		return "http://0.0.0.0" + addr
 	}
 	return "http://" + addr
 }
